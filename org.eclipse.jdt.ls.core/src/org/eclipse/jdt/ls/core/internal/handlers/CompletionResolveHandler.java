@@ -18,7 +18,6 @@ import static org.eclipse.jdt.internal.corext.template.java.SignatureUtil.stripS
 
 import java.io.Reader;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -153,10 +152,9 @@ public class CompletionResolveHandler {
 					String name = data.get(DATA_FIELD_NAME);
 					String[] paramSigs = CharOperation.NO_STRINGS;
 					if(data.containsKey( DATA_FIELD_SIGNATURE)){
-						if (proposal instanceof InternalCompletionProposal) {
-							Binding binding = ((InternalCompletionProposal) proposal).getBinding();
-							if (binding instanceof MethodBinding) {
-								MethodBinding methodBinding = (MethodBinding) binding;
+						if (proposal instanceof InternalCompletionProposal internalProposal) {
+							Binding binding = internalProposal.getBinding();
+							if (binding instanceof MethodBinding methodBinding) {
 								MethodBinding original = methodBinding.original();
 								char[] signature;
 								if (original != binding) {
@@ -193,7 +191,7 @@ public class CompletionResolveHandler {
 					String javadoc = null;
 					try {
 						final IMember curMember = member;
-						javadoc = SimpleTimeLimiter.create(Executors.newCachedThreadPool()).callWithTimeout(() -> {
+						javadoc = SimpleTimeLimiter.create(JavaLanguageServerPlugin.getExecutorService()).callWithTimeout(() -> {
 							Reader reader;
 							if (manager.getClientPreferences().isSupportsCompletionDocumentationMarkdown()) {
 								reader = JavadocContentAccess2.getMarkdownContentReader(curMember);

@@ -11,12 +11,13 @@
         </location>
         <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
             <unit id="org.eclipse.buildship.feature.group" version="0.0.0"/>
-            <repository location="https://download.eclipse.org/buildship/updates/e423/releases/3.x/3.1.6.v20220511-1359/"/>
+            <repository location="https://download.eclipse.org/buildship/updates/e423/snapshots/3.x/3.1.7.v20221108-1729-s/"/>
         </location>
         <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
             <unit id="org.eclipse.m2e.feature.feature.group" version="0.0.0"/>
             <unit id="org.eclipse.m2e.logback.feature.feature.group" version="0.0.0"/>
-	        <repository location="https://download.eclipse.org/technology/m2e/snapshots/latest/"/>
+            <unit id="ch.qos.logback.classic" version="0.0.0"/>
+	        <repository location="https://download.eclipse.org/technology/m2e/releases/latest/"/>
         </location>
         <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
             <unit id="org.eclipse.equinox.core.feature.feature.group" version="0.0.0"/>
@@ -27,7 +28,7 @@
             <unit id="org.eclipse.jdt.source.feature.group" version="0.0.0"/>
             <unit id="org.eclipse.sdk.feature.group" version="0.0.0"/>
             <unit id="org.mockito.mockito-core" version="0.0.0"/>
-            <repository location="https://download.eclipse.org/eclipse/updates/4.25-I-builds/I20220614-1800/"/>
+            <repository location="https://download.eclipse.org/eclipse/updates/4.27-I-builds/I20221206-1800"/>
         </location>
         <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
             <unit id="org.eclipse.xtend.sdk.feature.group" version="0.0.0"/>
@@ -35,7 +36,7 @@
             <repository location="https://download.eclipse.org/releases/2021-09/202109151000/"/>
         </location>
         <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
-           <repository location="https://download.eclipse.org/lsp4j/updates/releases/0.11.0/"/>
+           <repository location="https://download.eclipse.org/lsp4j/updates/releases/0.12.0/"/>
            <unit id="org.eclipse.lsp4j.sdk.feature.group" version="0.0.0"/>
         </location>
     </locations>

@@ -85,6 +85,7 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 	public static final String PROJECTS_IMPORTED = "__PROJECTS_IMPORTED__";
 	private static final String CORE_RESOURCES_MATCHER_ID = "org.eclipse.core.resources.regexFilterMatcher";
 	public static final String CREATED_BY_JAVA_LANGUAGE_SERVER = "__CREATED_BY_JAVA_LANGUAGE_SERVER__";
+	public static final String BUILD_FILE_MARKER_TYPE = "org.eclipse.jdt.ls.buildFileMarker";
 	private static final int JDTLS_FILTER_TYPE = IResourceFilterDescription.EXCLUDE_ALL | IResourceFilterDescription.INHERITABLE | IResourceFilterDescription.FILES | IResourceFilterDescription.FOLDERS;
 
 	private PreferenceManager preferenceManager;
@@ -119,8 +120,7 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 	private void updateEncoding(IProgressMonitor monitor) throws CoreException {
 		if (preferenceManager != null && ProjectEncodingMode.SETDEFAULT.equals(preferenceManager.getPreferences().getProjectEncoding())) {
 			IWorkspace workspace = ResourcesPlugin.getWorkspace();
-			if (workspace instanceof Workspace) {
-				Workspace ws = (Workspace) workspace;
+			if (workspace instanceof Workspace ws) {
 				CharsetManager charsetManager = ws.getCharsetManager();
 				String encoding = ResourcesPlugin.getEncoding();
 				for (IProject project : ProjectUtils.getAllProjects()) {
@@ -421,6 +421,7 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 						registerWatchers(true);
 					}
 					updateEncoding(monitor);
+					project.deleteMarkers(BUILD_FILE_MARKER_TYPE, false, IResource.DEPTH_ONE);
 					long elapsed = System.currentTimeMillis() - start;
 					JavaLanguageServerPlugin.logInfo("Updated " + projectName + " in " + elapsed + " ms");
 				} catch (Exception e) {
@@ -439,6 +440,22 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 	@Override
 	public Optional<IBuildSupport> getBuildSupport(IProject project) {
 		return buildSupports().filter(bs -> bs.applies(project)).findFirst();
+	}
+
+	/**
+	 * Check if the build support for the specified project depends on the default VM.
+	 */
+	public boolean useDefaultVM(IProject project, IVMInstall defaultVM) {
+		if (project == null) {
+			return false;
+		}
+
+		IBuildSupport buildSupport = getBuildSupport(project).orElse(null);
+		if (buildSupport != null) {
+			return buildSupport.useDefaultVM(project, defaultVM);
+		}
+
+		return false;
 	}
 
 	private Stream<IBuildSupport> buildSupports() {
@@ -540,6 +557,29 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 		return changed;
 	}
 
+	public static Runnable interruptAutoBuild() throws CoreException {
+		IWorkspace workspace = ResourcesPlugin.getWorkspace();
+		if (workspace instanceof Workspace ws) {
+			ws.getBuildManager().interrupt();
+			return () -> {
+			};
+		} else {
+			boolean changed = setAutoBuilding(false);
+			if (changed) {
+				return () -> {
+					try {
+						setAutoBuilding(true);
+					} catch (CoreException e) {
+						// ignore
+					}
+				};
+			} else {
+				return () -> {
+				};
+			}
+		}
+	}
+
 	public void configureFilters(IProgressMonitor monitor) throws CoreException {
 		List<String> resourceFilters = preferenceManager.getPreferences().getResourceFilters();
 		if (resourceFilters != null && !resourceFilters.isEmpty()) {
@@ -554,7 +594,7 @@ public abstract class ProjectsManager implements ISaveParticipant, IProjectsMana
 			List<IResourceFilterDescription> filters = Stream.of(project.getFilters())
 					.filter(f -> {
 						FileInfoMatcherDescription matcher = f.getFileInfoMatcherDescription();
-								return CORE_RESOURCES_MATCHER_ID.equals(matcher.getId()) && (matcher.getArguments() instanceof String) && ((String) matcher.getArguments()).contains(CREATED_BY_JAVA_LANGUAGE_SERVER);
+						return CORE_RESOURCES_MATCHER_ID.equals(matcher.getId()) && matcher.getArguments() instanceof String args && args.contains(CREATED_BY_JAVA_LANGUAGE_SERVER);
 					})
 					.collect(Collectors.toList());
 			boolean filterExists = false;

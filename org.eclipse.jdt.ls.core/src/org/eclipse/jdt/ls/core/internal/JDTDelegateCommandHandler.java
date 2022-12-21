@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017,2020 Microsoft Corporation and others.
+ * Copyright (c) 2017-2022 Microsoft Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
@@ -17,14 +17,19 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.jdt.ls.core.internal.commands.BuildPathCommand;
 import org.eclipse.jdt.ls.core.internal.commands.DiagnosticsCommand;
 import org.eclipse.jdt.ls.core.internal.commands.OrganizeImportsCommand;
 import org.eclipse.jdt.ls.core.internal.commands.ProjectCommand;
 import org.eclipse.jdt.ls.core.internal.commands.ProjectCommand.ClasspathOptions;
+import org.eclipse.jdt.ls.core.internal.framework.protobuf.ProtobufSupport;
 import org.eclipse.jdt.ls.core.internal.commands.SourceAttachmentCommand;
 import org.eclipse.jdt.ls.core.internal.commands.TypeHierarchyCommand;
+import org.eclipse.jdt.ls.core.internal.handlers.BundleUtils;
+import org.eclipse.jdt.ls.core.internal.handlers.CreateModuleInfoHandler;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionHandler;
 import org.eclipse.jdt.ls.core.internal.handlers.FormatterHandler;
 import org.eclipse.jdt.ls.core.internal.handlers.ResolveSourceMappingHandler;
 import org.eclipse.jdt.ls.core.internal.managers.GradleProjectImporter;
@@ -127,6 +132,25 @@ public class JDTDelegateCommandHandler implements IDelegateCommandHandler {
 				case "java.project.resolveWorkspaceSymbol":
 					SymbolInformation si = JSONUtility.toModel(arguments.get(0), SymbolInformation.class);
 					return ProjectCommand.resolveWorkspaceSymbol(si);
+				case "java.protobuf.generateSources":
+					ProtobufSupport.generateProtobufSources((ArrayList<String>) arguments.get(0), monitor);
+					return null;
+				case "java.project.createModuleInfo":
+					return CreateModuleInfoHandler.createModuleInfo((String) arguments.get(0), monitor);
+				case "java.reloadBundles":
+					try {
+						BundleUtils.loadBundles((ArrayList<String>) arguments.get(0));
+						return true;
+					} catch (CoreException e) {
+						JavaLanguageServerPlugin.log(e);
+						return false;
+					}
+				case "java.completion.onDidSelect":
+					CompletionHandler completionHandler = new CompletionHandler(JavaLanguageServerPlugin.getPreferencesManager());
+					String requestId = (String) arguments.get(0);
+					String proposalId = (String) arguments.get(1);
+					completionHandler.onDidCompletionItemSelect(requestId, proposalId);
+					return new Object();
 				default:
 					break;
 			}
