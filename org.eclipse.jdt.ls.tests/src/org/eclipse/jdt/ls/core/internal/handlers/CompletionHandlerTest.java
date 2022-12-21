@@ -47,6 +47,7 @@ import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.manipulation.CoreASTProvider;
 import org.eclipse.jdt.internal.codeassist.impl.AssistOptions;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
+import org.eclipse.jdt.ls.core.internal.JSONUtility;
 import org.eclipse.jdt.ls.core.internal.JavaClientConnection;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 import org.eclipse.jdt.ls.core.internal.JsonMessageHelper;
@@ -119,6 +120,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		//		sharedASTProvider.clearASTCreationCount();
 		javaClient = new JavaClientConnection(client);
 		lifeCycleHandler = new DocumentLifeCycleHandler(javaClient, preferenceManager, projectsManager, true);
+		preferences.setPostfixCompletionEnabled(false);
 	}
 
 	@After
@@ -3364,7 +3366,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 				.filter(item -> (item.getLabel().matches("\\(Object \\w+\\) -> : void") && item.getKind() == CompletionItemKind.Method))
 				.findFirst().orElse(null);
 		assertNotNull(lambda);
-		assertTrue(lambda.getTextEdit().getLeft().getNewText().matches("\\(\\$\\{1:\\w+\\}\\) -> \\$\\{0\\}"));
+		assertTrue(lambda.getTextEdit().getLeft().getNewText().matches("\\$\\{1:\\w+\\} -> \\$\\{0\\}"));
 	}
 
 	@Test
@@ -3499,8 +3501,139 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		assertEquals("java.util.ArrayList()", list.getItems().get(0).getFilterText());
 	}
 
+	@Test
+	public void testCompletion_withConflictingTypeNames() throws Exception{
+		getWorkingCopy("src/java/List.java",
+			"package util;\n" +
+			"public class List {\n" +
+			"}\n");
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"package util;\n" +
+				"public class Foo {\n"+
+						"	void foo() {\n"+
+						" 		Object list = new List();\n" +
+						"		List \n"+
+						"	}\n"+
+				"}\n");
+		CoreASTProvider.getInstance().setActiveJavaElement(unit);
+		CoreASTProvider.getInstance().getAST(unit, CoreASTProvider.WAIT_YES, monitor);
+
+		CompletionList list = requestCompletions(unit, "List", unit.getSource().indexOf("List()") + 6);
+		assertNotNull(list);
+		assertFalse("No proposals were found",list.getItems().isEmpty());
+
+		List<CompletionItem> items = list.getItems().stream().filter(p -> "java.util.List".equals(p.getDetail()))
+			.collect(Collectors.toList());
+		assertFalse("java.util.List not found",items.isEmpty());
+		assertEquals("java.util.List", items.get(0).getTextEdit().getLeft().getNewText());
+	}
+
+	@Test
+	public void testCompletion_lambdaWithNoParam() throws Exception{
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"public class Foo {\n"+
+						"	void foo() {\n"+
+						" 		Runnable r = \n" +
+						"	}\n"+
+				"}\n");
+
+		CompletionList list = requestCompletions(unit, "= ");
+		assertNotNull(list);
+		assertFalse("No proposals were found",list.getItems().isEmpty());
+
+		List<CompletionItem> items = list.getItems().stream().filter(p -> p.getLabel() != null && p.getLabel().contains("->"))
+			.collect(Collectors.toList());
+		assertFalse("Lambda not found",items.isEmpty());
+		assertTrue(items.get(0).getTextEdit().getLeft().getNewText().matches("\\(\\) -> \\$\\{0\\}"));
+	}
+
+	@Test
+	public void testCompletion_lambdaWithMultipleParams() throws Exception{
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"public class Foo {\n"+
+						"	void foo() {\n"+
+						" 		java.util.function.BiConsumer<Integer, Long> bc = \n" +
+						"	}\n"+
+				"}\n");
+
+		CompletionList list = requestCompletions(unit, "= ");
+		assertNotNull(list);
+		assertFalse("No proposals were found",list.getItems().isEmpty());
+
+		List<CompletionItem> items = list.getItems().stream().filter(p -> p.getLabel() != null && p.getLabel().contains("->"))
+			.collect(Collectors.toList());
+		assertFalse("Lambda not found",items.isEmpty());
+		assertTrue(items.get(0).getTextEdit().getLeft().getNewText().matches("\\(\\$\\{1:\\w+\\}\\, \\$\\{2:\\w+\\}\\) -> \\$\\{0\\}"));
+	}
+
+	@Test
+	public void testCompletion_MatchCaseOff() throws Exception {
+		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java", String.join("\n",
+			//@formatter:off
+					"package org.sample",
+					"public class Test {",
+					"	public static void main(String[] args) {",
+					"		i",
+					"	}",
+					"}"));
+					//@formatter:on
+			CompletionList list = requestCompletions(unit, "		i");
+			assertFalse(list.getItems().isEmpty());
+			boolean hasUpperCase = list.getItems().stream()
+				.anyMatch(t -> Character.isUpperCase(t.getLabel().charAt(0)));
+			assertTrue(hasUpperCase);
+	}
+
+	@Test
+	public void testCompletion_MatchCaseFirstLetter() throws Exception {
+		try {
+			preferenceManager.getPreferences().setCompletionMatchCaseMode(CompletionMatchCaseMode.FIRSTLETTER);
+			ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java", String.join("\n",
+			//@formatter:off
+					"package org.sample",
+					"public class Test {",
+					"	public static void main(String[] args) {",
+					"		i",
+					"	}",
+					"}"));
+					//@formatter:on
+			CompletionList list = requestCompletions(unit, "		i");
+			assertFalse(list.getItems().isEmpty());
+			boolean hasUpperCase = list.getItems().stream()
+				.anyMatch(t -> Character.isUpperCase(t.getLabel().charAt(0)));
+			assertFalse(hasUpperCase);
+		} finally {
+			preferenceManager.getPreferences().setCompletionMatchCaseMode(CompletionMatchCaseMode.OFF);
+		}
+	}
+
+	// https://github.com/eclipse/eclipse.jdt.ls/issues/2376
+	@Test
+	public void testCompletion_selectSnippetItem() throws Exception {
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"public class Foo {\n"+
+						"	void foo() {\n"+
+						" 		sysout\n" +
+						"	}\n"+
+				"}\n");
+
+		CompletionList list = requestCompletions(unit, "sysout");
+		CompletionItem completionItem = list.getItems().get(0);
+		Map<String, String> data = JSONUtility.toModel(completionItem.getData(), Map.class);
+		long requestId = Long.parseLong(data.get("rid"));
+		assertNotNull(CompletionResponses.get(requestId));
+	}
+
 	private CompletionList requestCompletions(ICompilationUnit unit, String completeBehind) throws JavaModelException {
-		int[] loc = findCompletionLocation(unit, completeBehind);
+		return requestCompletions(unit, completeBehind, 0);
+	}
+
+	private CompletionList requestCompletions(ICompilationUnit unit, String completeBehind, int fromIndex) throws JavaModelException {
+		int[] loc = findCompletionLocation(unit, completeBehind, fromIndex);
 		return server.completion(JsonMessageHelper.getParams(createCompletionRequest(unit, loc[0], loc[1]))).join().getRight();
 	}
 

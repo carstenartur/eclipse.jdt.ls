@@ -1,5 +1,100 @@
 # Change Log
 
+# [1.18.0 (December 1st, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/108?closed=1)
+ * enhancement - Add setting for clean ups to be applied when document is saved. See [#2298](https://github.com/eclipse/eclipse.jdt.ls/pull/2298), [#2307](https://github.com/eclipse/eclipse.jdt.ls/issues/2307), [#2342](https://github.com/eclipse/eclipse.jdt.ls/pull/2342).
+ * enhancement - Support "Add all missing imports". See [#2292](https://github.com/eclipse/eclipse.jdt.ls/pull/2292).
+ * enhancement - Support Gradle annotation processing. See [#2319](https://github.com/eclipse/eclipse.jdt.ls/pull/2319).
+ * enhancement - Add an option to configure null analysis, and set to `interactive` by default. See [#2279](https://github.com/eclipse/eclipse.jdt.ls/pull/2279), [#2314](https://github.com/eclipse/eclipse.jdt.ls/pull/2314).
+ * enhancement - Add contribution points for completion customization. See [#2110](https://github.com/eclipse/eclipse.jdt.ls/pull/2110).
+ * enhancement - Allow the language server to be run without using `IApplication`. See [#2311](https://github.com/eclipse/eclipse.jdt.ls/issues/2311).
+ * enhancement - Improve Lombok support and renaming fields when an accessor is present. See [#2339](https://github.com/eclipse/eclipse.jdt.ls/pull/2339).
+ * bug fix - Display the postfix completions at the bottom of the list. See [#2343](https://github.com/eclipse/eclipse.jdt.ls/pull/2343).
+ * bug fix - Do not reset existing project options when setting null analysis options. See [#2299](https://github.com/eclipse/eclipse.jdt.ls/pull/2299).
+ * bug fix - Code action response may contain `null` as one of the code actions. See [#2327](https://github.com/eclipse/eclipse.jdt.ls/issues/2327).
+ * bug fix - Inlay hints should not show up next to Lombok annotations. See [#2323](https://github.com/eclipse/eclipse.jdt.ls/issues/2323).
+ * bug fix - Ensure language server always terminates. See [#2302](https://github.com/eclipse/eclipse.jdt.ls/issues/2302).
+ * bug fix - Prevent a deadlock during language server initialization. See [#2301](https://github.com/eclipse/eclipse.jdt.ls/pull/2301).
+ * bug fix - Always send `begin` work done progress before sending `end`. See [#2258](https://github.com/eclipse/eclipse.jdt.ls/pull/2258).
+ * bug fix - Use existing Gradle project `.settings/` location if available. See [#2289](https://github.com/eclipse/eclipse.jdt.ls/pull/2289).
+ * bug fix - Avoid re-using the same job for the "Publish Diagnostics" job. See [#2356](https://github.com/eclipse/eclipse.jdt.ls/pull/2356).
+ * build - Use Predicate for filter. See [#2355](https://github.com/eclipse/eclipse.jdt.ls/pull/2355).
+ * build - WorkspaceDiagnosticsHandlerTest.testMissingNatures fails sometimes. See [#2331](https://github.com/eclipse/eclipse.jdt.ls/issues/2331).
+ * build - ProjectsManagerTest.testCancelInitJob fails randomly. See [#2326](https://github.com/eclipse/eclipse.jdt.ls/issues/2326).
+ * build - Fix CodeQL Java analysis error. See [#2318](https://github.com/eclipse/eclipse.jdt.ls/pull/2318).
+ * build - Set proper ranges for dependencies on LSP4J. See [#2310](https://github.com/eclipse/eclipse.jdt.ls/issues/2310).
+ * build - Bump Tycho from 2.7.5 to 3.0.0. See [#2260](https://github.com/eclipse/eclipse.jdt.ls/pull/2260).
+
+# [1.17.0 (October 27th, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/107?closed=1)
+ * performance - Improve project initialization. See [#2252](https://github.com/eclipse/eclipse.jdt.ls/pull/2252).
+ * performance - Re-use ExecutorService to avoid creating extra threads and resource leak. See [#2041](https://github.com/eclipse/eclipse.jdt.ls/pull/2041).
+ * enhancement - Add support for postfix completion. See [#863](https://github.com/eclipse/eclipse.jdt.ls/issues/863).
+ * enhancement - Add quick fix for "remove all unused imports". See [#2280](https://github.com/eclipse/eclipse.jdt.ls/pull/2280).
+ * enhancement - Add quick fixes for problems relating to sealed classes. See [#2265](https://github.com/eclipse/eclipse.jdt.ls/pull/2265).
+ * bug fix - Signature help not working correctly for parameterized types. See [#2293](https://github.com/eclipse/eclipse.jdt.ls/pull/2293).
+ * bug fix - Avoid NPE for null analysis when updating classpath. See [#2268](https://github.com/eclipse/eclipse.jdt.ls/issues/2268).
+ * bug fix - Check the digest of the initializiation scripts for security and to prevent duplicates. See [#2254](https://github.com/eclipse/eclipse.jdt.ls/pull/2254).
+ * bug fix - Support `includeDeclaration` in `textDocument/references`. See [#2148](https://github.com/eclipse/eclipse.jdt.ls/issues/2148).
+ * bug fix - Provide folding for import regions in `.class` files. See [#2281](https://github.com/eclipse/eclipse.jdt.ls/pull/2281).
+ * bug fix - Deadlock when using JDK 17 with Maven Java project. See [#2256](https://github.com/eclipse/eclipse.jdt.ls/pull/2256).
+ * bug fix - Ignore unnamed module for split packages. See [#2273](https://github.com/eclipse/eclipse.jdt.ls/pull/2273).
+ * bug fix - The project preference should only persist non default values. See [#2272](https://github.com/eclipse/eclipse.jdt.ls/issues/2272).
+ * bug fix - Synchronize contributed bundles on demand. See [#2267](https://github.com/eclipse/eclipse.jdt.ls/pull/2267).
+ * bug fix - Avoid unnecessary project updates when the default VM changes. See [#2266](https://github.com/eclipse/eclipse.jdt.ls/pull/2266).
+ * bug fix - Exclude non-compile scope dependencies from consideration for enabling null analysis. See [#2264](https://github.com/eclipse/eclipse.jdt.ls/pull/2264).
+ * bug fix - Add opportunistic support for Java/Kotlin polyglot Android projects. See [#2261](https://github.com/eclipse/eclipse.jdt.ls/pull/2261).
+ * debt - Bump eclipse-jarsigner-plugin from 1.3.2 to 1.3.4. See [#2262](https://github.com/eclipse/eclipse.jdt.ls/pull/2262), [#2263](https://github.com/eclipse/eclipse.jdt.ls/pull/2263).
+ * debt - `jdt.ls.socket-stream.launch` & `jdt.ls.remote.server.launch` are not running cleanly. See [#2277](https://github.com/eclipse/eclipse.jdt.ls/issues/2277).
+
+# [1.16.0 (September 29th, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/106?closed=1)
+ * enhancement - Provide Java 19 preview support. See [#2209](https://github.com/eclipse/eclipse.jdt.ls/pull/2209).
+ * enhancement - Enable annotation-based `null` analysis. See [#2228](https://github.com/eclipse/eclipse.jdt.ls/pull/2228).
+ * enhancement - Show generate `toString()`, `hashCode()` and `equals()` quick fixes on demand. See [#2213](https://github.com/eclipse/eclipse.jdt.ls/pull/2213).
+ * enhancement - Support creating `module-info.java`. See [#2231](https://github.com/eclipse/eclipse.jdt.ls/pull/2231).
+ * enhancement - Only add parentheses for lambda expression completions with multiple parameters. See [#2100](https://github.com/eclipse/eclipse.jdt.ls/issues/2100).
+ * enhancement - Add buildship auto sync preference when build configuration update is set to `automatic`. See [#2224](https://github.com/eclipse/eclipse.jdt.ls/pull/2224).
+ * bug fix - Show the field suggestions for the `toString()`, `hashCode()` and `equals()` generator dialogs in definition order. See [#2212](https://github.com/eclipse/eclipse.jdt.ls/pull/2212).
+ * bug fix - Fix Gradle project synchorization errors when init script path contains spaces. See [#2245](https://github.com/eclipse/eclipse.jdt.ls/pull/2245), [#2222](https://github.com/eclipse/eclipse.jdt.ls/issues/2222), [#2249](https://github.com/eclipse/eclipse.jdt.ls/pull/2249).
+ * bug fix - Fix NPE in the protobuf init script. See [#2246](https://github.com/eclipse/eclipse.jdt.ls/pull/2246).
+ * bug fix - Fix type completion when type name conflicts. See [#2232](https://github.com/eclipse/eclipse.jdt.ls/pull/2232).
+ * bug fix - Set up `-data` directory for the JDT-LS startup script. See [#2191](https://github.com/eclipse/eclipse.jdt.ls/issues/2191).
+ * bug fix - Remove the deprecated `-noverify` option from JDT-LS startup script. See [#2221](https://github.com/eclipse/eclipse.jdt.ls/issues/2221).
+ * bug fix - Fix gradle project classpath calculation. See [#2236](https://github.com/eclipse/eclipse.jdt.ls/pull/2236).
+ * bug fix - Bad ".git" pattern in `.project` file's `filteredResources` element causes chaos. See [#2244](https://github.com/eclipse/eclipse.jdt.ls/issues/2244).
+ * build - Make use of GitHub functions for library update and security analysis. See [#2239](https://github.com/eclipse/eclipse.jdt.ls/pull/2239).
+ * build - Increase maximum heap size used by builds during testing. See [#2226](https://github.com/eclipse/eclipse.jdt.ls/issues/2226).
+ * build - Update target platform to Eclipse 4.25 Release. See [#2225](https://github.com/eclipse/eclipse.jdt.ls/pull/2225).
+ * build - Update Gradle wrapper for failing tests. See [#2215](https://github.com/eclipse/eclipse.jdt.ls/issues/2215).
+ * build - Add tests for signature help on record class. See [#2206](https://github.com/eclipse/eclipse.jdt.ls/pull/2206).
+ * debt - Update Maven plugin versions. See [#2238](https://github.com/eclipse/eclipse.jdt.ls/pull/2238), [#2242](https://github.com/eclipse/eclipse.jdt.ls/pull/2242), [#2241](https://github.com/eclipse/eclipse.jdt.ls/pull/2241), [#2240](https://github.com/eclipse/eclipse.jdt.ls/pull/2240).
+
+# [1.15.0 (August 31st, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/105?closed=1)
+ * enhancement - Search more folders to infer source roots for invisible projects. See [#2176](https://github.com/eclipse/eclipse.jdt.ls/pull/2176).
+ * enhancement - Support for Android projects. See [#923](https://github.com/eclipse/eclipse.jdt.ls/issues/923).
+ * enhancement - Automatically add Protobuf output source directories to classpath & generate tasks, if necessary. See [#2189](https://github.com/eclipse/eclipse.jdt.ls/pull/2189) & [#2195](https://github.com/eclipse/eclipse.jdt.ls/pull/2195).
+ * enhancement - Support "Sort Members" code action. See [#2169](https://github.com/eclipse/eclipse.jdt.ls/pull/2169).
+ * enhancement - Add support for Maven offline mode (`java.import.maven.offline.enabled`). See [#2187](https://github.com/eclipse/eclipse.jdt.ls/pull/2187).
+ * enhancement - Support the `$/progress` notification method. See [#2030](https://github.com/eclipse/eclipse.jdt.ls/pull/2030).
+ * enhancement - Always interpret the full workspace symbol query as a package name. See [#2174](https://github.com/eclipse/eclipse.jdt.ls/pull/2174).
+ * enhancement - Add unmanaged folder nature ID. See [#2182](https://github.com/eclipse/eclipse.jdt.ls/pull/2182).
+ * bug fix - Set default severity of "Circular classpath" to `warning`. See [#2170](https://github.com/eclipse/eclipse.jdt.ls/pull/2170).
+ * bug fix - Fix inlay hints for `record` classes. See [#2181](https://github.com/eclipse/eclipse.jdt.ls/pull/2181).
+ * bug fix - Infer the source root only when necessary. See [#2178](https://github.com/eclipse/eclipse.jdt.ls/pull/2178).
+ * bug fix - Permit non-JDT errors to be reported in Java files. See [#2154](https://github.com/eclipse/eclipse.jdt.ls/issues/2154).
+ * bug fix - Avoid naming conflicts between Gradle project modules. See [#2190](https://github.com/eclipse/eclipse.jdt.ls/pull/2190).
+ * bug fix - Re-fetch the extension registry when delegate command lookup fails. See [#2184](https://github.com/eclipse/eclipse.jdt.ls/pull/2184).
+ * debt - Remove deprecated Gradle attributes. See [#2198](https://github.com/eclipse/eclipse.jdt.ls/pull/2198).
+
+# [1.14.0 (July 21st, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/104?closed=1)
+ * enhancement - Refresh the unmanaged project's classpath on demand. See [#2160](https://github.com/eclipse/eclipse.jdt.ls/pull/2160).
+ * enhancement - Provide reload project diagnostics on demand. See [#2164](https://github.com/eclipse/eclipse.jdt.ls/pull/2164).
+ * bug fix - Missing completions for fully qualified constructor names. See [#2147](https://github.com/eclipse/eclipse.jdt.ls/issues/2147).
+ * bug fix - Completion replacement for a type proposal is incorrect in some cases. See [#2146](https://github.com/eclipse/eclipse.jdt.ls/pull/2146).
+ * bug fix - Correct typo in gradle checksum mismatch error message. See [#2161](https://github.com/eclipse/eclipse.jdt.ls/pull/2161).
+ * build - Compile error in `MavenBuildSupport.update(IProject, boolean, IProgressMonitor)`. See [#2150](https://github.com/eclipse/eclipse.jdt.ls/issues/2150).
+ * build - React to removal of o.e.m2e.lifecyclemapping.defaults in M2E. See [#2149](https://github.com/eclipse/eclipse.jdt.ls/pull/2149).
+ * build - Automatically include the required plug-ins in the launch files. See [#2162](https://github.com/eclipse/eclipse.jdt.ls/pull/2162).
+ * build - Update target platform to I20220713-1800. See [#2157](https://github.com/eclipse/eclipse.jdt.ls/issues/2157).
+
 # [1.13.0 (June 30th, 2022)](https://github.com/eclipse/eclipse.jdt.ls/milestone/103?closed=1)
  * enhancement - Show `Add javadoc for ..` in quick assists. See [#2133](https://github.com/eclipse/eclipse.jdt.ls/pull/2133).
  * enhancement - Show `Change modifiers to final` in quick assists. See [#2134](https://github.com/eclipse/eclipse.jdt.ls/pull/2134).

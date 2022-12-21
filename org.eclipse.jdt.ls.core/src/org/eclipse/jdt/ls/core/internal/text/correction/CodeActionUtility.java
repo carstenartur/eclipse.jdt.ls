@@ -17,8 +17,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
+import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.SimpleName;
@@ -87,14 +91,14 @@ public class CodeActionUtility {
 			if (parent instanceof VariableDeclarationFragment) {
 				return CodeActionUtility.getFieldNamesFromASTNode(parent);
 			}
-		} else if (node instanceof VariableDeclarationFragment) {
-			SimpleName name = ((VariableDeclarationFragment) node).getName();
+		} else if (node instanceof VariableDeclarationFragment varibleDecl) {
+			SimpleName name = varibleDecl.getName();
 			if (name != null) {
 				return Arrays.asList(name.getIdentifier());
 			}
-		} else if (node instanceof FieldDeclaration) {
+		} else if (node instanceof FieldDeclaration fieldDecl) {
 			List<String> names = new ArrayList<>();
-			List<VariableDeclarationFragment> fragments = ((FieldDeclaration) node).fragments();
+			List<VariableDeclarationFragment> fragments = fieldDecl.fragments();
 			for (VariableDeclarationFragment fragment : fragments) {
 				names.addAll(CodeActionUtility.getFieldNamesFromASTNode(fragment));
 			}
@@ -109,14 +113,50 @@ public class CodeActionUtility {
 			if (name != null) {
 				return Arrays.asList(name.getIdentifier());
 			}
-		} else if (node instanceof VariableDeclarationStatement) {
+		} else if (node instanceof VariableDeclarationStatement variableDecl) {
 			List<String> names = new ArrayList<>();
-			List<VariableDeclarationFragment> fragments = ((VariableDeclarationStatement) node).fragments();
+			List<VariableDeclarationFragment> fragments = variableDecl.fragments();
 			for (VariableDeclarationFragment fragment : fragments) {
 				names.addAll(CodeActionUtility.getFieldNamesFromASTNode(fragment));
 			}
 			return names;
 		}
 		return Collections.emptyList();
+	}
+
+	public static String getTypeName(AbstractTypeDeclaration node) {
+		SimpleName name = node.getName();
+		if (name != null) {
+			return name.getIdentifier();
+		}
+		return null;
+	}
+
+	public static boolean hasMethod(IType type, String methodName, Class... parameterTypes) {
+		if (type == null) {
+			return false;
+		}
+		try {
+			return Stream.of(type.getMethods()).anyMatch(method -> {
+				if (!method.getElementName().equals(methodName)) {
+					return false;
+				}
+				if (method.getParameterTypes().length != parameterTypes.length) {
+					return false;
+				}
+				String[] parameterTypeNames = method.getParameterTypes();
+				if (parameterTypes.length != parameterTypeNames.length) {
+					return false;
+				}
+				for (int i = 0; i < parameterTypeNames.length; i++) {
+					if (parameterTypes[i].getName().equals(parameterTypeNames[i])) {
+						return false;
+					}
+				}
+				return true;
+			});
+		} catch (JavaModelException e) {
+			return false;
+		}
 	}
 }

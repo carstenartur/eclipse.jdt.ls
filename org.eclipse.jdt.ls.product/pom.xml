@@ -4,7 +4,7 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
-		<version>1.14.0-SNAPSHOT</version>
+		<version>1.19.0-SNAPSHOT</version>
 		<groupId>org.eclipse.jdt.ls</groupId>
 		<artifactId>parent</artifactId>
 	</parent>
@@ -66,7 +66,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-resources-plugin</artifactId>
-				<version>3.2.0</version>
+				<version>3.3.0</version>
 				<executions>
 					<execution>
 						<id>copy-config-mac</id>
@@ -191,7 +191,7 @@
 					<plugin>
 						<groupId>org.codehaus.mojo</groupId>
 						<artifactId>build-helper-maven-plugin</artifactId>
-						<version>1.9.1</version>
+						<version>3.3.0</version>
 						<executions>
 							<execution>
 								<phase>validate</phase>
@@ -209,7 +209,7 @@
 					<plugin>
 						<groupId>net.ju-n.maven.plugins</groupId>
 						<artifactId>checksum-maven-plugin</artifactId>
-						<version>1.2</version>
+						<version>1.4</version>
 						<executions>
 							<execution>
 								<goals>

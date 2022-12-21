@@ -50,8 +50,8 @@ import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
 import org.eclipse.jdt.ls.core.internal.preferences.Preferences;
 import org.eclipse.jdt.ls.core.internal.text.correction.AssignToVariableAssistCommandProposal;
 import org.eclipse.jdt.ls.core.internal.text.correction.CUCorrectionCommandProposal;
-import org.eclipse.jdt.ls.core.internal.text.correction.NonProjectFixProcessor;
 import org.eclipse.jdt.ls.core.internal.text.correction.CodeActionComparator;
+import org.eclipse.jdt.ls.core.internal.text.correction.NonProjectFixProcessor;
 import org.eclipse.jdt.ls.core.internal.text.correction.QuickAssistProcessor;
 import org.eclipse.jdt.ls.core.internal.text.correction.RefactoringCorrectionCommandProposal;
 import org.eclipse.jdt.ls.core.internal.text.correction.SourceAssistProcessor;
@@ -160,6 +160,7 @@ public class CodeActionHandler {
 			try {
 				codeActions.addAll(nonProjectFixProcessor.getCorrections(params, context, locations));
 				List<ChangeCorrectionProposal> quickfixProposals = this.quickFixProcessor.getCorrections(context, locations);
+				this.quickFixProcessor.addAddAllMissingImportsProposal(context, quickfixProposals);
 				Set<ChangeCorrectionProposal> quickSet = new TreeSet<>(comparator);
 				quickSet.addAll(quickfixProposals);
 				proposals.addAll(quickSet);
@@ -227,12 +228,12 @@ public class CodeActionHandler {
 			if (action.isRight()) {
 				Either<ChangeCorrectionProposal, CodeActionProposal> proposal = null;
 				Object originalData = action.getRight().getData();
-				if (originalData instanceof CodeActionData) {
-					Object originalProposal = ((CodeActionData) originalData).getProposal();
-					if (originalProposal instanceof ChangeCorrectionProposal) {
-						proposal = Either.forLeft((ChangeCorrectionProposal) originalProposal);
-					} else if (originalProposal instanceof CodeActionProposal) {
-						proposal = Either.forRight((CodeActionProposal) originalProposal);
+				if (originalData instanceof CodeActionData codeActionData) {
+					Object originalProposal = codeActionData.getProposal();
+					if (originalProposal instanceof ChangeCorrectionProposal changeCorrectionProposal) {
+						proposal = Either.forLeft(changeCorrectionProposal);
+					} else if (originalProposal instanceof CodeActionProposal codeActionProposal) {
+						proposal = Either.forRight(codeActionProposal);
 					} else {
 						action.getRight().setData(null);
 						return;
@@ -259,14 +260,11 @@ public class CodeActionHandler {
 		String name = proposal.getName();
 
 		Command command = null;
-		if (proposal instanceof CUCorrectionCommandProposal) {
-			CUCorrectionCommandProposal commandProposal = (CUCorrectionCommandProposal) proposal;
+		if (proposal instanceof CUCorrectionCommandProposal commandProposal) {
 			command = new Command(name, commandProposal.getCommand(), commandProposal.getCommandArguments());
-		} else if (proposal instanceof RefactoringCorrectionCommandProposal) {
-			RefactoringCorrectionCommandProposal commandProposal = (RefactoringCorrectionCommandProposal) proposal;
+		} else if (proposal instanceof RefactoringCorrectionCommandProposal commandProposal) {
 			command = new Command(name, commandProposal.getCommand(), commandProposal.getCommandArguments());
-		} else if (proposal instanceof AssignToVariableAssistCommandProposal) {
-			AssignToVariableAssistCommandProposal commandProposal = (AssignToVariableAssistCommandProposal) proposal;
+		} else if (proposal instanceof AssignToVariableAssistCommandProposal commandProposal) {
 			command = new Command(name, commandProposal.getCommand(), commandProposal.getCommandArguments());
 		} else {
 			if (!this.preferenceManager.getClientPreferences().isResolveCodeActionSupported()) {
@@ -283,16 +281,18 @@ public class CodeActionHandler {
 			CodeAction codeAction = new CodeAction(name);
 			codeAction.setKind(proposal.getKind());
 			if (command == null) { // lazy resolve the edit.
-				codeAction.setData(new CodeActionData(proposal));
+				// The relevance is in descending order while CodeActionComparator sorts in ascending order
+				codeAction.setData(new CodeActionData(proposal, -proposal.getRelevance()));
 			} else {
 				codeAction.setCommand(command);
+				codeAction.setData(new CodeActionData(null, -proposal.getRelevance()));
 			}
 			if (proposal.getKind() != JavaCodeActionKind.QUICK_ASSIST) {
 				codeAction.setDiagnostics(context.getDiagnostics());
 			}
 			return Optional.of(Either.forRight(codeAction));
 		} else {
-			return Optional.of(Either.forLeft(command));
+			return Optional.ofNullable(command != null ? Either.forLeft(command) : null);
 		}
 	}
 
@@ -305,8 +305,7 @@ public class CodeActionHandler {
 			boolean isError = diagnostic.getSeverity() == DiagnosticSeverity.Error;
 			int problemId = getProblemId(diagnostic);
 			List<String> arguments = new ArrayList<>();
-			if (diagnostic.getData() instanceof JsonArray) {
-				final JsonArray data = (JsonArray) diagnostic.getData();
+			if (diagnostic.getData() instanceof JsonArray data) {
 				for (JsonElement e : data) {
 					arguments.add(e.getAsString());
 				}

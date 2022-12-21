@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016-2017 Red Hat Inc. and others.
+ * Copyright (c) 2016-2022 Red Hat Inc. and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
@@ -25,11 +25,14 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -71,6 +74,7 @@ import org.eclipse.jdt.ls.core.internal.ProjectUtils;
 import org.eclipse.jdt.ls.core.internal.ResourceUtils;
 import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
 import org.eclipse.jdt.ls.core.internal.preferences.Preferences;
+import org.eclipse.jdt.ls.core.internal.preferences.Preferences.FeatureStatus;
 import org.eclipse.jdt.ls.internal.gradle.checksums.ValidationResult;
 import org.eclipse.jdt.ls.internal.gradle.checksums.WrapperValidator;
 import org.eclipse.lsp4j.ExecuteCommandParams;
@@ -279,6 +283,9 @@ public class GradleProjectImporter extends AbstractProjectImporter {
 			}
 			break;
 		}
+
+		GradleUtils.synchronizeAnnotationProcessingConfiguration(subMonitor);
+
 		subMonitor.done();
 	}
 
@@ -433,11 +440,14 @@ public class GradleProjectImporter extends AbstractProjectImporter {
 		Preferences preferences = getPreferences();
 		File javaHome = getJavaHome(preferences);
 		File gradleUserHome = getGradleUserHomeFile();
-		List<String> gradleArguments = preferences.getGradleArguments();
+		List<String> gradleArguments = new ArrayList<>();
+		gradleArguments.addAll(getGradleInitScriptArgs());
+		gradleArguments.addAll(preferences.getGradleArguments());
 		List<String> gradleJvmArguments = preferences.getGradleJvmArguments();
 		boolean offlineMode = preferences.isImportGradleOfflineEnabled();
+		boolean autoSync = preferences.getUpdateBuildConfigurationStatus().equals(FeatureStatus.automatic);
 		boolean overrideWorkspaceConfiguration = !(distribution instanceof WrapperGradleDistribution) || offlineMode || (gradleArguments != null && !gradleArguments.isEmpty()) || (gradleJvmArguments != null && !gradleJvmArguments.isEmpty())
-				|| gradleUserHome != null || javaHome != null;
+				|| gradleUserHome != null || javaHome != null || autoSync;
 		// @formatter:off
 		BuildConfiguration build = BuildConfiguration.forRootProjectDirectory(rootFolder.toFile())
 				.overrideWorkspaceConfiguration(overrideWorkspaceConfiguration)
@@ -447,9 +457,21 @@ public class GradleProjectImporter extends AbstractProjectImporter {
 				.gradleUserHome(gradleUserHome)
 				.jvmArguments(gradleJvmArguments)
 				.offlineMode(offlineMode)
+				.autoSync(autoSync)
 				.build();
 		// @formatter:on
 		return build;
+	}
+
+	static boolean useDefaultVM() {
+		File javaHome = getGradleJavaHomeFile();
+		if (javaHome == null) {
+			IVMInstall javaDefaultRuntime = JavaRuntime.getDefaultVMInstall();
+			return javaDefaultRuntime != null
+				&& javaDefaultRuntime.getVMRunner(ILaunchManager.RUN_MODE) != null;
+		}
+
+		return false;
 	}
 
 	private static File getJavaHome(Preferences preferences) {
@@ -544,6 +566,43 @@ public class GradleProjectImporter extends AbstractProjectImporter {
 			// Do nothing
 		}
 		return true;
+	}
+
+	/**
+	 * Get Gradle init script arguments
+	 */
+	private static List<String> getGradleInitScriptArgs() {
+		List<String> args = new LinkedList<>();
+
+		// Add init script of jdt.ls
+		File initScript = GradleUtils.getGradleInitScript("/gradle/init/init.gradle");
+		addInitScriptToArgs(initScript, args);
+
+		PreferenceManager preferencesManager = JavaLanguageServerPlugin.getPreferencesManager();
+		if (preferencesManager == null) {
+			return args;
+		}
+
+		// Add init script of protobuf support
+		if (preferencesManager.getPreferences().isProtobufSupportEnabled()) {
+			File protobufInitScript =  GradleUtils.getGradleInitScript("/gradle/protobuf/init.gradle");
+			addInitScriptToArgs(protobufInitScript, args);
+		}
+
+		// Add init script of android support
+		if (preferencesManager.getPreferences().isAndroidSupportEnabled()) {
+			File androidInitScript =  GradleUtils.getGradleInitScript("/gradle/android/init.gradle");
+			addInitScriptToArgs(androidInitScript, args);
+		}
+
+		return args;
+	}
+
+	private static void addInitScriptToArgs(File initScript, List<String> args) {
+		if (initScript != null && initScript.exists() && initScript.length() > 0) {
+			args.add("--init-script");
+			args.add(initScript.getAbsolutePath());
+		}
 	}
 
 	@Override

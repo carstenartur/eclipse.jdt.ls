@@ -48,6 +48,7 @@ import org.eclipse.jdt.ls.core.internal.JobHelpers;
 import org.eclipse.jdt.ls.core.internal.LanguageServerWorkingCopyOwner;
 import org.eclipse.jdt.ls.core.internal.ServiceStatus;
 import org.eclipse.jdt.ls.core.internal.codemanipulation.GenerateGetterSetterOperation.AccessorField;
+import org.eclipse.jdt.ls.core.internal.handlers.CodeActionHandler.CodeActionData;
 import org.eclipse.jdt.ls.core.internal.handlers.FindLinksHandler.FindLinksParams;
 import org.eclipse.jdt.ls.core.internal.handlers.GenerateAccessorsHandler.AccessorCodeActionParams;
 import org.eclipse.jdt.ls.core.internal.handlers.GenerateAccessorsHandler.GenerateAccessorsParams;
@@ -137,8 +138,8 @@ import org.eclipse.lsp4j.TypeDefinitionParams;
 import org.eclipse.lsp4j.WillSaveTextDocumentParams;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
-import org.eclipse.lsp4j.extended.ProjectConfigurationsUpdateParam;
 import org.eclipse.lsp4j.extended.ProjectBuildParams;
+import org.eclipse.lsp4j.extended.ProjectConfigurationsUpdateParam;
 import org.eclipse.lsp4j.jsonrpc.CompletableFutures;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.jsonrpc.services.JsonDelegate;
@@ -158,10 +159,6 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 
 	public static final String JAVA_LSP_JOIN_ON_COMPLETION = "java.lsp.joinOnCompletion";
 	public static final String JAVA_LSP_INITIALIZE_WORKSPACE = "java.lsp.initializeWorkspace";
-	/**
-	 * Exit code returned when JDTLanguageServer is forced to exit.
-	 */
-	private static final int FORCED_EXIT_CODE = 1;
 	private ProjectsManager pm;
 	private LanguageServerWorkingCopyOwner workingCopyOwner;
 	private PreferenceManager preferenceManager;
@@ -284,8 +281,12 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 					// still call to enable defaults in case client does not support configuration changes
 					syncCapabilitiesToSettings();
 
+					// before send the service ready notification, make sure all bundles are synchronized
+					synchronizeBundles();
+
 					client.sendStatus(ServiceStatus.ServiceReady, "ServiceReady");
 					status = ServiceStatus.ServiceReady;
+					pm.projectsImported(monitor);
 				} catch (OperationCanceledException | CoreException e) {
 					logException(e.getMessage(), e);
 					return Status.CANCEL_STATUS;
@@ -378,6 +379,30 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 		}
 	}
 
+	/**
+	 * Ask client to check if any bundles need to be synchronized.
+	 */
+	private void synchronizeBundles() {
+		try {
+			Object commandResult = JavaLanguageServerPlugin.getInstance()
+				.getClientConnection().executeClientCommand("_java.reloadBundles.command");
+			if (commandResult instanceof List<?> list) {
+				List<String> bundlesToRefresh = (List<String>) commandResult;
+				if (bundlesToRefresh.size() > 0) {
+					BundleUtils.loadBundles(bundlesToRefresh);
+				}
+			} else if (commandResult instanceof Map<?, ?> m) {
+				String message = (String) m.get("message");
+				JavaLanguageServerPlugin.logError(message);
+			} else {
+				JavaLanguageServerPlugin.logError(
+					"Unexpected result from executeClientCommand: " + commandResult);
+			}
+		} catch (Exception e) {
+			JavaLanguageServerPlugin.logException(e);
+		}
+	}
+
 	private CodeActionOptions getCodeActionOptions() {
 		String[] kinds = { CodeActionKind.QuickFix, CodeActionKind.Refactor, CodeActionKind.RefactorExtract, CodeActionKind.RefactorInline, CodeActionKind.RefactorRewrite, CodeActionKind.Source, CodeActionKind.SourceOrganizeImports };
 		List<String> codeActionKinds = new ArrayList<>();
@@ -413,6 +438,10 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	@Override
 	public void exit() {
 		logInfo(">> exit");
+		Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+			logInfo("Forcing exit after 1 min.");
+			System.exit(FORCED_EXIT_CODE);
+		}, 1, TimeUnit.MINUTES);
 		if (!shutdownReceived) {
 			shutdownJob.schedule();
 		}
@@ -422,10 +451,6 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 			JavaLanguageServerPlugin.logException(e.getMessage(), e);
 		}
 		JavaLanguageServerPlugin.getLanguageServer().exit();
-		Executors.newSingleThreadScheduledExecutor().schedule(() -> {
-			logInfo("Forcing exit after 1 min.");
-			System.exit(FORCED_EXIT_CODE);
-		}, 1, TimeUnit.MINUTES);
 	}
 
 	/* (non-Javadoc)
@@ -467,12 +492,20 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	public void didChangeConfiguration(DidChangeConfigurationParams params) {
 		logInfo(">> workspace/didChangeConfiguration");
 		Object settings = JSONUtility.toModel(params.getSettings(), Map.class);
+		boolean nullAnalysisOptionsUpdated = false;
 		if (settings instanceof Map) {
 			Collection<IPath> rootPaths = preferenceManager.getPreferences().getRootPaths();
 			@SuppressWarnings("unchecked")
 			Preferences prefs = Preferences.createFrom((Map<String, Object>) settings);
 			prefs.setRootPaths(rootPaths);
+			boolean nullAnalysisConfigurationsChanged =!prefs.getNullableTypes().equals(preferenceManager.getPreferences().getNullableTypes())
+				|| !prefs.getNonnullTypes().equals(preferenceManager.getPreferences().getNonnullTypes())
+				|| !prefs.getNullAnalysisMode().equals(preferenceManager.getPreferences().getNullAnalysisMode());
 			preferenceManager.update(prefs);
+			if (nullAnalysisConfigurationsChanged) {
+				// trigger rebuild all the projects when the null analysis configuration changed **and** the compiler options updated
+				nullAnalysisOptionsUpdated = this.preferenceManager.getPreferences().updateAnnotationNullAnalysisOptions();
+			}
 		}
 		if (status == ServiceStatus.ServiceReady) {
 			// If we toggle on the capabilities too early before the tasks in initialized handler finished,
@@ -487,7 +520,7 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 		}
 		try {
 			boolean autoBuildChanged = ProjectsManager.setAutoBuilding(preferenceManager.getPreferences().isAutobuildEnabled());
-			if (jvmChanged) {
+			if (jvmChanged || nullAnalysisOptionsUpdated) {
 				buildWorkspace(Either.forLeft(true));
 			} else if (autoBuildChanged) {
 				buildWorkspace(Either.forLeft(false));
@@ -676,9 +709,16 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	@Override
 	public CompletableFuture<CodeAction> resolveCodeAction(CodeAction params) {
 		logInfo(">> codeAction/resolve");
+		Object data = params.getData();
 		// if no data property is specified, no further resolution the server can provide, so return the original result back.
-		if (params.getData() == null) {
+		if (data == null) {
 			return CompletableFuture.completedFuture(params);
+		}
+		if (data instanceof CodeActionData codeActionData) {
+			// if the data is CodeActionData and no proposal in the data, return the original result back.
+			if (codeActionData.getProposal() == null) {
+				return CompletableFuture.completedFuture(params);
+			}
 		}
 		if (CodeActionHandler.codeActionStore.isEmpty()) {
 			return CompletableFuture.completedFuture(params);
@@ -752,7 +792,7 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	@Override
 	public CompletableFuture<Either<Range, PrepareRenameResult>> prepareRename(PrepareRenameParams params) {
 		logInfo(">> document/prepareRename");
-		PrepareRenameHandler handler = new PrepareRenameHandler();
+		PrepareRenameHandler handler = new PrepareRenameHandler(preferenceManager);
 		return computeAsync((monitor) -> {
 			waitForLifecycleJobs(monitor);
 			return handler.prepareRename(params, monitor);

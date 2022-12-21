@@ -23,10 +23,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.CompletionContext;
 import org.eclipse.jdt.core.CompletionProposal;
 import org.eclipse.jdt.core.CompletionRequestor;
@@ -156,7 +156,6 @@ public final class SignatureHelpRequestor extends CompletionRequestor {
 		}
 
 		char[] signature = SignatureUtil.fix83600(methodProposal.getSignature());
-		// todo: cannot get parameter names for record class
 		char[][] parameterNames = methodProposal.findParameterNames(null);
 		char[][] parameterTypes = Signature.getParameterTypes(signature);
 
@@ -210,12 +209,16 @@ public final class SignatureHelpRequestor extends CompletionRequestor {
 
 	public String computeJavaDoc(CompletionProposal proposal) {
 		try {
-			IType type = unit.getJavaProject().findType(SignatureUtil.stripSignatureToFQN(String.valueOf(proposal.getDeclarationSignature())));
+			String fullyQualifiedName = SignatureUtil.stripSignatureToFQN(String.valueOf(proposal.getDeclarationSignature()));
+			IType type = unit.getJavaProject().findType(fullyQualifiedName);
+			if (type == null) {
+				// find secondary types if primary type search is missed.
+				type = unit.getJavaProject().findType(fullyQualifiedName, new NullProgressMonitor());
+			}
 			if (type != null) {
-				if (proposal instanceof InternalCompletionProposal) {
-					Binding binding = ((InternalCompletionProposal) proposal).getBinding();
-					if (binding instanceof MethodBinding) {
-						MethodBinding methodBinding = (MethodBinding) binding;
+				if (proposal instanceof InternalCompletionProposal internalCompletionProposal) {
+					Binding binding = internalCompletionProposal.getBinding();
+					if (binding instanceof MethodBinding methodBinding) {
 						MethodBinding original = methodBinding.original();
 						char[] signature;
 						if (original != binding) {
@@ -235,7 +238,7 @@ public final class SignatureHelpRequestor extends CompletionRequestor {
 							}
 							String javadoc = null;
 							try {
-								javadoc = SimpleTimeLimiter.create(Executors.newCachedThreadPool()).callWithTimeout(() -> {
+								javadoc = SimpleTimeLimiter.create(JavaLanguageServerPlugin.getExecutorService()).callWithTimeout(() -> {
 									Reader reader = JavadocContentAccess.getPlainTextContentReader(method);
 									return reader == null ? null : CharStreams.toString(reader);
 								}, 500, TimeUnit.MILLISECONDS);
