@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016-2019 Red Hat Inc. and others.
+ * Copyright (c) 2016-2022 Red Hat Inc. and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
@@ -14,6 +14,7 @@
 package org.eclipse.jdt.ls.core.internal.managers;
 
 import static java.util.Arrays.asList;
+import static java.util.Map.entry;
 import static org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin.logInfo;
 import static org.eclipse.jdt.ls.core.internal.ResourceUtils.isContainedIn;
 
@@ -42,6 +43,7 @@ import java.util.stream.Stream;
 import org.eclipse.core.internal.preferences.EclipsePreferences;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
+import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ISaveContext;
@@ -76,6 +78,9 @@ import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 import org.eclipse.jdt.ls.core.internal.JobHelpers;
 import org.eclipse.jdt.ls.core.internal.ProjectUtils;
 import org.eclipse.jdt.ls.core.internal.ResourceUtils;
+import org.eclipse.jdt.ls.core.internal.framework.IFrameworkSupport;
+import org.eclipse.jdt.ls.core.internal.framework.android.AndroidSupport;
+import org.eclipse.jdt.ls.core.internal.framework.protobuf.ProtobufSupport;
 import org.eclipse.jdt.ls.core.internal.handlers.FormatterHandler;
 import org.eclipse.jdt.ls.core.internal.preferences.IPreferencesChangeListener;
 import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
@@ -219,7 +224,8 @@ public class StandardProjectsManager extends ProjectsManager {
 			return;
 		}
 		try {
-			Optional<IBuildSupport> bs = getBuildSupport(resource.getProject());
+			IProject project = resource.getProject();
+			Optional<IBuildSupport> bs = getBuildSupport(project);
 			if (bs.isPresent()) {
 				IBuildSupport buildSupport = bs.get();
 
@@ -227,15 +233,23 @@ public class StandardProjectsManager extends ProjectsManager {
 					return;
 				}
 
-				boolean requireConfigurationUpdate = buildSupport.fileChanged(resource, changeType, new NullProgressMonitor());
+				boolean requireConfigurationUpdate = buildSupport.fileChanged(resource, changeType, new NullProgressMonitor()) &&
+						JavaLanguageServerPlugin.getDigestStore().updateDigest(resource.getLocation().toFile().toPath());
 				if (requireConfigurationUpdate) {
 					FeatureStatus status = preferenceManager.getPreferences().getUpdateBuildConfigurationStatus();
 					switch (status) {
 						case automatic:
-							// do not force the build, because it's not started by user and should be done only if build file has changed
-							updateProject(resource.getProject(), false);
+							if (ProjectUtils.isGradleProject(project)) {
+								// The sync task is handled by Buildship when sync.auto is turned on,
+								// except for the annotation processing configuration updating.
+								// See https://github.com/redhat-developer/vscode-java/issues/2673
+								GradleBuildSupport.syncAnnotationProcessingConfiguration(project, new NullProgressMonitor());
+								return;
+							}
+							updateProject(project, true);
 							break;
 						case disabled:
+							appendBuildFileMarker(resource);
 							break;
 						default:
 							if (client != null) {
@@ -246,12 +260,26 @@ public class StandardProjectsManager extends ProjectsManager {
 												new Command("Always", cmd, asList(uri, FeatureStatus.automatic)), new Command("Never", cmd, asList(uri, FeatureStatus.disabled))));
 								client.sendActionableNotification(updateProjectConfigurationNotification);
 							}
+							appendBuildFileMarker(resource);
+							break;
 					}
 				}
 			}
 		} catch (CoreException e) {
 			JavaLanguageServerPlugin.logException("Problem refreshing workspace", e);
 		}
+	}
+
+	private void appendBuildFileMarker(IResource resource) throws CoreException {
+		IMarker[] markers = resource.findMarkers(BUILD_FILE_MARKER_TYPE, false, IResource.DEPTH_ZERO);
+		if (markers.length > 0) {
+			return;
+		}
+
+		resource.createMarker(BUILD_FILE_MARKER_TYPE, Map.ofEntries(
+			entry(IMarker.MESSAGE, "The build file has been changed and may need reload to make it effective."),
+			entry(IMarker.SEVERITY, IMarker.SEVERITY_INFO)
+		));
 	}
 
 	/**
@@ -304,13 +332,12 @@ public class StandardProjectsManager extends ProjectsManager {
 		});
 		if (properties != null && !properties.isEmpty()) {
 			properties.forEach((k, v) -> {
-				if (k instanceof String && v instanceof String) {
-					String path = (String) k;
+				if (k instanceof String path && v instanceof String value) {
 					if (!"file_export_version".equals(path) && path.charAt(0) != '@' && path.charAt(0) != '!') {
 						String[] decoded = EclipsePreferences.decodePath(path);
 						String key = decoded[1];
 						if (key != null) {
-							javaOptions.put(key, (String) v);
+							javaOptions.put(key, value);
 						}
 					}
 				}
@@ -332,8 +359,7 @@ public class StandardProjectsManager extends ProjectsManager {
 	private static void initializeDefaultOptions(Preferences preferences) {
 		Hashtable<String, String> defaultOptions = JavaCore.getDefaultOptions();
 		IVMInstall defaultVM = JavaRuntime.getDefaultVMInstall();
-		if (defaultVM instanceof AbstractVMInstall) {
-			AbstractVMInstall jvm = (AbstractVMInstall) defaultVM;
+		if (defaultVM instanceof AbstractVMInstall jvm) {
 			long jdkLevel = CompilerOptions.versionToJdkLevel(jvm.getJavaVersion());
 			String compliance = CompilerOptions.versionFromJdkLevel(jdkLevel);
 			JavaCore.setComplianceOptions(compliance, defaultOptions);
@@ -611,5 +637,15 @@ public class StandardProjectsManager extends ProjectsManager {
 				JavaLanguageServerPlugin.logException(e.getMessage(), e);
 			}
 		});
+	}
+
+	@Override
+	public void projectsImported(IProgressMonitor monitor) {
+		// TODO: consider to register as a extension point once we have multiple frameworks to support.
+		IFrameworkSupport protobufSupport = new ProtobufSupport();
+		protobufSupport.onDidProjectsImported(monitor);
+		IFrameworkSupport androidSupport = new AndroidSupport();
+		androidSupport.onDidProjectsImported(monitor);
+		this.preferenceManager.getPreferences().updateAnnotationNullAnalysisOptions();
 	}
 }

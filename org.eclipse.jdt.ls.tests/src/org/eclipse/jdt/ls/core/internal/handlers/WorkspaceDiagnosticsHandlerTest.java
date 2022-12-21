@@ -216,7 +216,6 @@ public class WorkspaceDiagnosticsHandlerTest extends AbstractProjectsManagerBase
 		IMarker m1 = createMavenMarker(IMarker.SEVERITY_ERROR, msg1, 2, 95, 100);
 
 		IDocument d = mock(IDocument.class);
-		when(d.getLineOffset(1)).thenReturn(90);
 
 		List<Diagnostic> diags = WorkspaceDiagnosticsHandler.toDiagnosticsArray(d, new IMarker[] { m1, null }, true);
 		assertEquals(1, diags.size());
@@ -386,14 +385,20 @@ public class WorkspaceDiagnosticsHandlerTest extends AbstractProjectsManagerBase
 	public void testMissingNatures() throws Exception {
 		//import project
 		importProjects("eclipse/wtpproject");
+		waitForBackgroundJobs();
 		ArgumentCaptor<PublishDiagnosticsParams> captor = ArgumentCaptor.forClass(PublishDiagnosticsParams.class);
 		verify(connection, atLeastOnce()).publishDiagnostics(captor.capture());
 		List<PublishDiagnosticsParams> allCalls = captor.getAllValues();
 		Collections.reverse(allCalls);
 		projectsManager.setConnection(client);
-		Optional<PublishDiagnosticsParams> projectDiags = allCalls.stream().filter(p -> (p.getUri().endsWith("eclipse/wtpproject")) || p.getUri().endsWith("eclipse/wtpproject/")).findFirst();
-		assertTrue(projectDiags.isPresent());
-		assertEquals("Unexpected diagnostics:\n" + projectDiags.get().getDiagnostics(), 1, projectDiags.get().getDiagnostics().size());
+		// https://github.com/eclipse/eclipse.jdt.ls/issues/2331
+		boolean hasMissingNature = false;
+		for (PublishDiagnosticsParams projectDiags : allCalls) {
+			if (hasMissingNature = projectDiags.getDiagnostics().stream().filter(p -> (p.getMessage().startsWith("Unknown referenced nature"))).findFirst().isPresent()) {
+				break;
+			}
+		}
+		assertTrue(hasMissingNature);
 	}
 
 	@Test

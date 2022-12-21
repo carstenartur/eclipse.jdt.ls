@@ -95,6 +95,7 @@ public interface IProposalRelevance {
 	public static final int INSERT_INFERRED_TYPE_ARGUMENTS= 7;
 	public static final int RETURN_ALLOCATED_OBJECT_MATCH= 7;
 	public static final int CREATE_LOCAL= 7;
+	public static final int DECLARE_SEALED_AS_DIRECT_SUPER_TYPE = 7;
 
 	public static final int MOVE_REFACTORING = 6;
 	public static final int REMOVE_SEMICOLON= 6;
@@ -190,6 +191,7 @@ public interface IProposalRelevance {
 	public static final int REMOVE_REDUNDANT_NULLNESS_ANNOTATION= 5;
 	public static final int REPLACE_WITH_UNQUALIFIED_ENUM_CONSTANT= 5;
 	public static final int OVERRIDE_DEFAULT_METHOD= 5;
+	public static final int ADD_MISSING_ANNOTATION_ATTRIBUTES = 5;
 
 	public static final int ADD_MISSING_TAG= 4;
 	public static final int INSERT_FALL_THROUGH= 4;

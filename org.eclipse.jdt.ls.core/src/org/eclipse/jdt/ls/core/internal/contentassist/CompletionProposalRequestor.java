@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016-2021 Red Hat Inc. and others.
+ * Copyright (c) 2016-2022 Red Hat Inc. and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
@@ -22,6 +22,8 @@ import java.util.Set;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.CompletionContext;
 import org.eclipse.jdt.core.CompletionProposal;
 import org.eclipse.jdt.core.CompletionRequestor;
@@ -33,13 +35,18 @@ import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.Signature;
+import org.eclipse.jdt.internal.corext.template.java.SignatureUtil;
+import org.eclipse.jdt.ls.core.contentassist.CompletionRanking;
+import org.eclipse.jdt.ls.core.contentassist.ICompletionRankingProvider;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionContributionService;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionMatchCaseMode;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionRankingAggregation;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionResolveHandler;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionResponse;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionResponses;
 import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
-import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionItemTag;
@@ -169,26 +176,74 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		if (isFiltered(proposal)) {
 			return;
 		}
-		if (!isIgnored(proposal.getKind())) {
-			if (proposal.getKind() == CompletionProposal.POTENTIAL_METHOD_DECLARATION) {
-				acceptPotentialMethodDeclaration(proposal);
-			} else {
-				if (proposal.getKind() == CompletionProposal.PACKAGE_REF && unit.getParent() != null && String.valueOf(proposal.getCompletion()).equals(unit.getParent().getElementName())) {
-					// Hacky way to boost relevance of current package, for package completions, until
-					// https://bugs.eclipse.org/518140 is fixed
-					proposal.setRelevance(proposal.getRelevance() + 1);
-				}
-				proposals.add(proposal);
+
+		if (isIgnored(proposal.getKind())) {
+			return;
+		}
+
+		if (!matchCase(proposal)) {
+			return;
+		}
+
+		if (proposal.getKind() == CompletionProposal.POTENTIAL_METHOD_DECLARATION) {
+			acceptPotentialMethodDeclaration(proposal);
+		} else {
+			if (proposal.getKind() == CompletionProposal.PACKAGE_REF && unit.getParent() != null && String.valueOf(proposal.getCompletion()).equals(unit.getParent().getElementName())) {
+				// Hacky way to boost relevance of current package, for package completions, until
+				// https://bugs.eclipse.org/518140 is fixed
+				proposal.setRelevance(proposal.getRelevance() + 1);
 			}
+			proposals.add(proposal);
 		}
 	}
 
 	public List<CompletionItem> getCompletionItems() {
-		//Sort the results by relevance 1st
+		return getCompletionItems(new NullProgressMonitor());
+	}
+
+	public List<CompletionItem> getCompletionItems(IProgressMonitor monitor) {
+		CompletionRankingAggregation[] aggregatedRanks = getAggregatedRankingResult(monitor);
+		for (int i = 0; i < proposals.size(); i++) {
+			CompletionProposal proposal = proposals.get(i);
+			if (aggregatedRanks[i] != null) {
+				// we assume there won't be overflow for now since the the score from
+				// each provider can only be 100 at most.
+				proposal.setRelevance(proposal.getRelevance() + aggregatedRanks[i].getScore());
+			}
+		}
+		Map<CompletionProposal, CompletionRankingAggregation> proposalToRankingResult = new HashMap<>();
+		for (int i = 0; i < proposals.size(); i++) {
+			proposalToRankingResult.put(proposals.get(i), aggregatedRanks[i]);
+		}
+
 		proposals.sort(new ProposalComparator(proposals.size()));
-		List<CompletionItem> completionItems = new ArrayList<>(proposals.size());
 		int maxCompletions = preferenceManager.getPreferences().getMaxCompletionResults();
 		int limit = Math.min(proposals.size(), maxCompletions);
+		List<CompletionItem> completionItems = new ArrayList<>(limit);
+
+		//Let's compute replacement texts for the most relevant results only
+		for (int i = 0; i < limit; i++) {
+			CompletionProposal proposal = proposals.get(i);
+			try {
+				CompletionItem item = toCompletionItem(proposal, i);
+				CompletionRankingAggregation rankingResult = proposalToRankingResult.get(proposal);
+				if (rankingResult != null) {
+					String decorators = rankingResult.getDecorators();
+					if (!decorators.isEmpty()) {
+						item.setLabel(decorators + " " + item.getLabel());
+					}
+					Map<String, String> itemData = (Map<String, String>) item.getData();
+					Map<String, String> rankingData = (Map<String, String>) rankingResult.getData();
+					for (String key : rankingData.keySet()) {
+						itemData.put(key, rankingData.get(key));
+					}
+				}
+				completionItems.add(item);
+			} catch (Exception e) {
+				JavaLanguageServerPlugin.logException(e.getMessage(), e);
+			}
+		}
+
 		if (proposals.size() > maxCompletions) {
 			//we keep receiving completions past our capacity so that makes the whole result incomplete
 			isComplete = false;
@@ -196,19 +251,37 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		} else {
 			response.setProposals(proposals);
 		}
+		response.setItems(completionItems);
 		CompletionResponses.store(response);
 
-		//Let's compute replacement texts for the most relevant results only
-		for (int i = 0; i < limit; i++) {
-			CompletionProposal proposal = proposals.get(i);
-			try {
-				CompletionItem item = toCompletionItem(proposal, i);
-				completionItems.add(item);
-			} catch (Exception e) {
-				JavaLanguageServerPlugin.logException(e.getMessage(), e);
+		return completionItems;
+	}
+
+	private CompletionRankingAggregation[] getAggregatedRankingResult(IProgressMonitor monitor) {
+		List<ICompletionRankingProvider> providers =
+				((CompletionContributionService) JavaLanguageServerPlugin.getCompletionContributionService()).getRankingProviders();
+		CompletionRankingAggregation[] resultCombination = new CompletionRankingAggregation[this.proposals.size()];
+		if (providers != null && !providers.isEmpty()) {
+			for (ICompletionRankingProvider provider : providers) {
+				CompletionRanking[] results = provider.rank(proposals, context, unit, monitor);
+				if (results == null || results.length != proposals.size()) {
+					continue;
+				}
+
+				for (int i = 0; i < results.length; i++) {
+					if (results[i] == null) {
+						continue;
+					}
+					if (resultCombination[i] == null) {
+						resultCombination[i] = new CompletionRankingAggregation();
+					}
+					resultCombination[i].addScore(results[i].getScore());
+					resultCombination[i].addDecorator(results[i].getDecorator());
+					resultCombination[i].addData(results[i].getData());
+				}
 			}
 		}
-		return completionItems;
+		return resultCombination;
 	}
 
 	public CompletionItem toCompletionItem(CompletionProposal proposal, int index) {
@@ -240,12 +313,6 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 				$.setFilterText(newText);
 			}
 		}
-		if (preferenceManager.getPreferences().isSignatureHelpEnabled()) {
-			String onSelectedCommand = preferenceManager.getClientPreferences().getCompletionItemCommand();
-			if (!onSelectedCommand.isEmpty()) {
-				$.setCommand(new Command("Command triggered for completion", onSelectedCommand));
-			}
-		}
 		return $;
 	}
 
@@ -254,7 +321,7 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		super.acceptContext(context);
 		this.context = context;
 		response.setContext(context);
-		this.descriptionProvider = new CompletionProposalDescriptionProvider(context);
+		this.descriptionProvider = new CompletionProposalDescriptionProvider(unit, context);
 		this.proposalProvider = new CompletionProposalReplacementProvider(unit, context, response.getOffset(), preferenceManager.getPreferences(), preferenceManager.getClientPreferences());
 	}
 
@@ -452,4 +519,31 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		return fullTypeName != null && TypeFilter.isFiltered(fullTypeName);
 	}
 
+	/**
+	 * Check if the case is match between the proposal and the token according to the preference.
+	 * @param proposal completion proposal.
+	 */
+	private boolean matchCase(CompletionProposal proposal) {
+		if (CompletionMatchCaseMode.FIRSTLETTER != preferenceManager.getPreferences().getCompletionMatchCaseMode()) {
+			return true;
+		}
+
+		if (this.context.getToken().length == 0 || proposal.getCompletion().length == 0) {
+			return true;
+		}
+
+		char firstCharOfCompletion;
+		if (proposal.getKind() == CompletionProposal.TYPE_REF) {
+			String simpleTypeName = SignatureUtil.getSimpleTypeName(proposal);
+			firstCharOfCompletion = simpleTypeName.charAt(0);
+		} else {
+			firstCharOfCompletion = proposal.getCompletion()[0];
+		}
+
+		if (this.context.getToken()[0] != firstCharOfCompletion) {
+			return false;
+		}
+
+		return true;
+	}
 }

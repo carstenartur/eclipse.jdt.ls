@@ -22,7 +22,9 @@ import static org.mockito.Mockito.when;
 
 import java.net.URI;
 
+import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.Path;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
@@ -648,6 +650,18 @@ public class SignatureHelpHandlerTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void testSignatureHelp_record() throws Exception {
+		importProjects("eclipse/java16");
+		IProject proj = WorkspaceHelper.getProject("java16");
+		IJavaProject javaProject = JavaCore.create(proj);
+		ICompilationUnit unit = (ICompilationUnit) javaProject.findElement(new Path("foo/bar/Bar.java"));
+		SignatureHelp help = getSignatureHelp(unit, 9, 10);
+		assertNotNull(help);
+		SignatureInformation signature = help.getSignatures().get(help.getActiveSignature());
+		assertTrue(signature.getLabel().equals("Edge(int fromNodeId, int toNodeId, Object fromPoint, Object toPoint, double length, Object profile)"));
+	}
+
+	@Test
 	public void testSignatureHelp_superConstructorInvocation() throws JavaModelException {
 		IPackageFragment pack1 = sourceFolder.createPackageFragment("test1", false, null);
 		StringBuilder buf = new StringBuilder();
@@ -1112,6 +1126,30 @@ public class SignatureHelpHandlerTest extends AbstractCompilationUnitBasedTest {
 		assertNotNull(help);
 		Either<String, MarkupContent> documentation = help.getSignatures().get(help.getActiveSignature()).getDocumentation();
 		assertEquals("This is an API.", documentation.getLeft().trim());
+	}
+
+	@Test
+	public void testSignatureHelp_erasureType() throws Exception {
+		when(preferenceManager.getPreferences().isSignatureHelpDescriptionEnabled()).thenReturn(true);
+		IPackageFragment pack1 = sourceFolder.createPackageFragment("test1", false, null);
+		StringBuilder buf = new StringBuilder();
+		buf.append("package test1;\n");
+		buf.append("public class E {\n");
+		buf.append("	public void foo() {\n");
+		buf.append("		new V<String>();\n");
+		buf.append("	}\n");
+		buf.append("}\n");
+		buf.append("class V<T> {\n");
+		buf.append("	/** hi */\n");
+		buf.append("	public V() {}\n");
+		buf.append("	private V(String a) {}\n");
+		buf.append("}\n");
+		ICompilationUnit cu = pack1.createCompilationUnit("E.java", buf.toString(), false, null);
+		SignatureHelp help = getSignatureHelp(cu, 3, 16);
+		assertNotNull(help);
+		assertEquals(1, help.getSignatures().size());
+		Either<String, MarkupContent> documentation = help.getSignatures().get(help.getActiveSignature()).getDocumentation();
+		assertEquals("hi", documentation.getLeft().trim());
 	}
 
 	@Test

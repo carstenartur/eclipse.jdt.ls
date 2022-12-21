@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016-2019 Red Hat Inc. and others.
+ * Copyright (c) 2016-2022 Red Hat Inc. and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
@@ -57,11 +57,12 @@ import org.eclipse.jdt.internal.core.manipulation.JavaManipulationPlugin;
 import org.eclipse.jdt.internal.core.manipulation.MembersOrderPreferenceCacheCommon;
 import org.eclipse.jdt.internal.core.search.indexing.IndexManager;
 import org.eclipse.jdt.internal.corext.codemanipulation.CodeGenerationSettingsConstants;
-import org.eclipse.jdt.internal.corext.template.java.VarResolver;
+import org.eclipse.jdt.ls.core.contentassist.ICompletionContributionService;
 import org.eclipse.jdt.ls.core.internal.JavaClientConnection.JavaLanguageClient;
 import org.eclipse.jdt.ls.core.internal.contentassist.TypeFilter;
-import org.eclipse.jdt.ls.core.internal.corext.template.java.JavaContextType;
+import org.eclipse.jdt.ls.core.internal.corext.template.java.JavaContextTypeRegistry;
 import org.eclipse.jdt.ls.core.internal.corext.template.java.JavaLanguageServerTemplateStore;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionContributionService;
 import org.eclipse.jdt.ls.core.internal.handlers.JDTLanguageServer;
 import org.eclipse.jdt.ls.core.internal.managers.ContentProviderManager;
 import org.eclipse.jdt.ls.core.internal.managers.DigestStore;
@@ -73,7 +74,6 @@ import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
 import org.eclipse.jdt.ls.core.internal.preferences.StandardPreferenceManager;
 import org.eclipse.jdt.ls.core.internal.syntaxserver.SyntaxLanguageServer;
 import org.eclipse.jdt.ls.core.internal.syntaxserver.SyntaxProjectsManager;
-import org.eclipse.jface.text.templates.TemplateVariableResolver;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
 import org.eclipse.lsp4j.jsonrpc.MessageConsumer;
 import org.eclipse.text.templates.ContextTypeRegistry;
@@ -113,6 +113,7 @@ public class JavaLanguageServerPlugin extends Plugin {
 	public static final String PLUGIN_ID = IConstants.PLUGIN_ID;
 
 	public static final String DEFAULT_MEMBER_SORT_ORDER = "T,SF,SI,SM,F,I,C,M"; //$NON-NLS-1$
+	public static final String DEFAULT_VISIBILITY_SORT_ORDER = "B,R,D,V"; //$NON-NLS-1$
 
 	private static JavaLanguageServerPlugin pluginInstance;
 	private static BundleContext context;
@@ -123,7 +124,7 @@ public class JavaLanguageServerPlugin extends Plugin {
 
 	private ISourceDownloader sourceDownloader;
 
-	private LanguageServer languageServer;
+	private LanguageServerApplication languageServer;
 	private ProjectsManager projectsManager;
 	private DigestStore digestStore;
 	private ContentProviderManager contentProviderManager;
@@ -139,7 +140,10 @@ public class JavaLanguageServerPlugin extends Plugin {
 
 	private DiagnosticsState nonProjectDiagnosticsState;
 
-	public static LanguageServer getLanguageServer() {
+	private ExecutorService executorService;
+	private CompletionContributionService completionContributionService;
+
+	public static LanguageServerApplication getLanguageServer() {
 		return pluginInstance == null ? null : pluginInstance.languageServer;
 	}
 
@@ -349,7 +353,7 @@ public class JavaLanguageServerPlugin extends Plugin {
 
 	private void startConnection() throws IOException {
 		Launcher<JavaLanguageClient> launcher;
-		ExecutorService executorService = Executors.newCachedThreadPool();
+		ExecutorService executorService = getExecutorService();
 		if (JDTEnvironmentUtils.isSyntaxServer()) {
 			protocol = new SyntaxLanguageServer(contentProviderManager, projectsManager, preferenceManager);
 		} else {
@@ -456,7 +460,7 @@ public class JavaLanguageServerPlugin extends Plugin {
 		}
 	}
 
-	static void startLanguageServer(LanguageServer newLanguageServer) throws IOException {
+	static void startLanguageServer(LanguageServerApplication newLanguageServer) throws IOException {
 		if (pluginInstance != null) {
 			pluginInstance.languageServer = newLanguageServer;
 			pluginInstance.startConnection();
@@ -568,21 +572,7 @@ public class JavaLanguageServerPlugin extends Plugin {
 	 */
 	public synchronized ContextTypeRegistry getTemplateContextRegistry() {
 		if (fContextTypeRegistry == null) {
-			ContextTypeRegistry registry = new ContextTypeRegistry();
-
-			JavaContextType statementContextType = new JavaContextType();
-			statementContextType.setId(JavaContextType.ID_STATEMENTS);
-			statementContextType.setName(JavaContextType.ID_STATEMENTS);
-			statementContextType.initializeContextTypeResolvers();
-			// Todo: Some of the resolvers is defined in the XML of the jdt.ui, now we have to add them manually.
-			// See: https://github.com/eclipse/eclipse.jdt.ui/blob/cf6c42522ee5a5ea21a34fcfdecf3504d4750a04/org.eclipse.jdt.ui/plugin.xml#L5619-L5625
-			TemplateVariableResolver resolver = new VarResolver();
-			resolver.setType("var");
-			statementContextType.addResolver(resolver);
-
-			registry.addContextType(statementContextType);
-
-			fContextTypeRegistry = registry;
+			fContextTypeRegistry = new JavaContextTypeRegistry();
 		}
 		return fContextTypeRegistry;
 	}
@@ -624,5 +614,19 @@ public class JavaLanguageServerPlugin extends Plugin {
 			pluginInstance.sourceDownloader = new MavenSourceDownloader();
 		}
 		return pluginInstance.sourceDownloader;
+	}
+
+	public synchronized static ExecutorService getExecutorService() {
+		if (pluginInstance.executorService == null || pluginInstance.executorService.isShutdown()) {
+			pluginInstance.executorService = Executors.newCachedThreadPool();
+		}
+		return pluginInstance.executorService;
+	}
+
+	public synchronized static ICompletionContributionService getCompletionContributionService() {
+		if (pluginInstance.completionContributionService == null) {
+			pluginInstance.completionContributionService = new CompletionContributionService();
+		}
+		return pluginInstance.completionContributionService;
 	}
 }
