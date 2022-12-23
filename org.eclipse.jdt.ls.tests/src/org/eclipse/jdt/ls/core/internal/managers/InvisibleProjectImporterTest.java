@@ -19,15 +19,26 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.File;
+import java.nio.file.FileVisitOption;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
+import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IProjectDescription;
+import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
@@ -35,7 +46,9 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.launching.JavaRuntime;
 import org.eclipse.jdt.ls.core.internal.JavaProjectHelper;
 import org.eclipse.jdt.ls.core.internal.ProjectUtils;
+import org.eclipse.jdt.ls.core.internal.ResourceUtils;
 import org.eclipse.jdt.ls.core.internal.TestVMType;
+import org.eclipse.jdt.ls.core.internal.managers.InvisibleProjectImporter.JavaFileDetector;
 import org.eclipse.jdt.ls.core.internal.preferences.ClientPreferences;
 import org.eclipse.jdt.ls.core.internal.preferences.Preferences;
 import org.eclipse.lsp4j.FileSystemWatcher;
@@ -53,6 +66,7 @@ public class InvisibleProjectImporterTest extends AbstractInvisibleProjectBasedT
 	public void importCompleteFolder() throws Exception {
 		IProject invisibleProject = copyAndImportFolder("singlefile/lesson1", "src/org/samples/HelloWorld.java");
 		assertTrue(invisibleProject.exists());
+		assertTrue(invisibleProject.hasNature(UnmanagedFolderNature.NATURE_ID));
 		IPath sourcePath = invisibleProject.getFolder(new Path(ProjectUtils.WORKSPACE_LINK).append("src")).getFullPath();
 		assertTrue(ProjectUtils.isOnSourcePath(sourcePath, JavaCore.create(invisibleProject)));
 	}
@@ -186,7 +200,7 @@ public class InvisibleProjectImporterTest extends AbstractInvisibleProjectBasedT
 	public void testPreviewFeaturesEnabledByDefault() throws Exception {
 		String defaultJVM = JavaRuntime.getDefaultVMInstall().getId();
 		try {
-			TestVMType.setTestJREAsDefault("18");
+			TestVMType.setTestJREAsDefault("19");
 			IProject invisibleProject = copyAndImportFolder("singlefile/java14", "foo/bar/Foo.java");
 			assertTrue(invisibleProject.exists());
 			assertNoErrors(invisibleProject);
@@ -388,6 +402,102 @@ public class InvisibleProjectImporterTest extends AbstractInvisibleProjectBasedT
 			if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE) {
 				assertEquals("bin/", entry.getExclusionPatterns()[0].toString());
 			}
+		}
+	}
+
+	@Test
+	public void testInferSourceRoot() throws Exception {
+		preferenceManager.getPreferences().setJavaImportExclusions(Arrays.asList("**/excluded"));
+		IProject invisibleProject = copyAndImportFolder("singlefile/inferSourceRoot", "lesson1/Lesson1.java");
+		waitForBackgroundJobs();
+
+		IFolder projectFolder = invisibleProject.getFolder(ProjectUtils.WORKSPACE_LINK);
+		IPath workspaceRoot = projectFolder.getLocation();
+		preferenceManager.getPreferences().setRootPaths(Arrays.asList(workspaceRoot));
+
+		IJavaProject javaProject = JavaCore.create(invisibleProject);
+		long sourceRootsCount = Arrays.stream(javaProject.getRawClasspath())
+				.filter(cp -> cp.getEntryKind() == IClasspathEntry.CPE_SOURCE)
+				.count();
+		assertEquals(3, sourceRootsCount);
+
+		IFile unDiscoveredFile = invisibleProject.getFile("_/a/very/deep/path/Source.java");
+		InvisibleProjectImporter.inferSourceRoot(javaProject, unDiscoveredFile.getLocation());
+		waitForBackgroundJobs();
+		sourceRootsCount = Arrays.stream(javaProject.getRawClasspath())
+				.filter(cp -> cp.getEntryKind() == IClasspathEntry.CPE_SOURCE)
+				.count();
+		assertEquals(4, sourceRootsCount);
+
+		List<IMarker> markers = ResourceUtils.getErrorMarkers(invisibleProject);
+		assertEquals(0, markers.size());
+	}
+
+	@Test
+	public void testInferSourceRoot2() throws Exception {
+		preferenceManager.getPreferences().setJavaImportExclusions(Arrays.asList("**/excluded"));
+		IProject invisibleProject = copyAndImportFolder("singlefile/inferSourceRoot", "Main.java");
+		waitForBackgroundJobs();
+
+		IFolder projectFolder = invisibleProject.getFolder(ProjectUtils.WORKSPACE_LINK);
+		IPath workspaceRoot = projectFolder.getLocation();
+		preferenceManager.getPreferences().setRootPaths(Arrays.asList(workspaceRoot));
+
+		IJavaProject javaProject = JavaCore.create(invisibleProject);
+		long sourceRootsCount = Arrays.stream(javaProject.getRawClasspath())
+				.filter(cp -> cp.getEntryKind() == IClasspathEntry.CPE_SOURCE)
+				.count();
+		assertEquals(3, sourceRootsCount);
+
+		IFile unDiscoveredFile = invisibleProject.getFile("_/a/very/deep/path/Source.java");
+		InvisibleProjectImporter.inferSourceRoot(javaProject, unDiscoveredFile.getLocation());
+		waitForBackgroundJobs();
+		sourceRootsCount = Arrays.stream(javaProject.getRawClasspath())
+				.filter(cp -> cp.getEntryKind() == IClasspathEntry.CPE_SOURCE)
+				.count();
+		assertEquals(4, sourceRootsCount);
+
+		List<IMarker> markers = ResourceUtils.getErrorMarkers(invisibleProject);
+		assertEquals(0, markers.size());
+	}
+
+	@Test
+	public void javaFileDetectorTest() throws Exception {
+		createMockProject();
+		preferenceManager.getPreferences().setJavaImportExclusions(Arrays.asList("**/excluded"));
+		File root = new File(getSourceProjectDirectory(), "singlefile/invisibleFileDetector");
+		List<File> foldersToSearch = new ArrayList<>();
+		for (File folder : root.listFiles()) {
+			if (folder.isDirectory()) {
+				foldersToSearch.add(folder);
+			}
+		}
+
+		JavaFileDetector detector = new JavaFileDetector(null);
+		for (File file : foldersToSearch) {
+			Files.walkFileTree(file.toPath(), EnumSet.noneOf(FileVisitOption.class), 3 /*maxDepth*/, detector);
+		}
+		Set<IPath> triggerFiles = detector.getTriggerFiles();
+
+		assertEquals(0, triggerFiles.size());
+	}
+
+	private void createMockProject() throws CoreException {
+		IProgressMonitor monitor = new NullProgressMonitor();
+		IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject("mock");
+		if (!project.exists()) {
+			IProjectDescription description = ResourcesPlugin.getWorkspace().newProjectDescription("mock");
+			project.create(description, monitor);
+			project.open(monitor);
+			description.setNatureIds(new String[] { JavaCore.NATURE_ID });
+			project.setDescription(description, monitor);
+			IFolder folder = project.getFolder("_");
+			if (!folder.exists()) {
+				folder.create(true, true, monitor);
+			}
+			IFile fakeFile = project.getFile("_/Other.java");
+			File file = new File(getSourceProjectDirectory(), "singlefile/invisibleFileDetector/other-project/Other.java");
+			fakeFile.createLink(file.toURI(), IResource.REPLACE, monitor);
 		}
 	}
 }

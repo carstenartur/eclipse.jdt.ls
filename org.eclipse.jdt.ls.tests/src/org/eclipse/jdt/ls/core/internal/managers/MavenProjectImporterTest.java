@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.io.FileUtils;
 import org.eclipse.core.resources.IFile;
@@ -46,12 +47,16 @@ import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 import org.eclipse.jdt.ls.core.internal.ProjectUtils;
 import org.eclipse.jdt.ls.core.internal.ResourceUtils;
 import org.eclipse.jdt.ls.core.internal.WorkspaceHelper;
+import org.eclipse.jdt.ls.core.internal.handlers.BuildWorkspaceHandler;
 import org.eclipse.jdt.ls.core.internal.handlers.ProgressReporterManager;
+import org.eclipse.jdt.ls.core.internal.preferences.Preferences.FeatureStatus;
 import org.eclipse.lsp4j.jsonrpc.CancelChecker;
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.junit.MockitoJUnitRunner;
+
+import com.google.common.collect.ImmutableList;
 
 /**
  * @author Fred Bricon
@@ -322,6 +327,17 @@ public class MavenProjectImporterTest extends AbstractMavenBasedTest {
 		IJavaProject javaProject = JavaCore.create(project);
 		assertEquals(JavaCore.ENABLED, javaProject.getOption(JavaCore.COMPILER_PB_ENABLE_PREVIEW_FEATURES, false));
 		assertEquals(JavaCore.IGNORE, javaProject.getOption(JavaCore.COMPILER_PB_REPORT_PREVIEW_FEATURES, false));
+		// assertNoErrors(project);
+	}
+
+	@Test
+	public void testJava19Project() throws Exception {
+		IProject project = importMavenProject("salut-java19");
+		assertIsJavaProject(project);
+		assertEquals("19", getJavaSourceLevel(project));
+		IJavaProject javaProject = JavaCore.create(project);
+		assertEquals(JavaCore.ENABLED, javaProject.getOption(JavaCore.COMPILER_PB_ENABLE_PREVIEW_FEATURES, false));
+		assertEquals(JavaCore.IGNORE, javaProject.getOption(JavaCore.COMPILER_PB_REPORT_PREVIEW_FEATURES, false));
 		assertNoErrors(project);
 	}
 
@@ -349,6 +365,30 @@ public class MavenProjectImporterTest extends AbstractMavenBasedTest {
 			assertFalse(importer.applies(configurationPaths, null));
 		} finally {
 			this.preferences.setImportMavenEnabled(true);
+		}
+	}
+
+	// https://github.com/redhat-developer/vscode-java/issues/2712
+	@Test
+	public void testNullAnalysisDisabled() throws Exception {
+		this.preferenceManager.getPreferences().setNonnullTypes(ImmutableList.of("javax.annotation.Nonnull", "org.eclipse.jdt.annotation.NonNull"));
+		this.preferenceManager.getPreferences().setNullableTypes(ImmutableList.of("org.eclipse.jdt.annotation.Nullable", "javax.annotation.Nonnull"));
+		this.preferenceManager.getPreferences().setNullAnalysisMode(FeatureStatus.automatic);
+		try {
+			IProject project = importMavenProject("null-analysis");
+			assertIsJavaProject(project);
+			if (this.preferenceManager.getPreferences().updateAnnotationNullAnalysisOptions()) {
+				BuildWorkspaceHandler buildWorkspaceHandler = new BuildWorkspaceHandler(JavaLanguageServerPlugin.getProjectsManager());
+				buildWorkspaceHandler.buildWorkspace(true, new NullProgressMonitor());
+			}
+			IJavaProject javaProject = JavaCore.create(project);
+			Map<String, String> options = javaProject.getOptions(true);
+			assertEquals(JavaCore.DISABLED, options.get(JavaCore.COMPILER_ANNOTATION_NULL_ANALYSIS));
+		} finally {
+			this.preferenceManager.getPreferences().setNonnullTypes(Collections.emptyList());
+			this.preferenceManager.getPreferences().setNullableTypes(Collections.emptyList());
+			this.preferenceManager.getPreferences().setNullAnalysisMode(FeatureStatus.disabled);
+			this.preferenceManager.getPreferences().updateAnnotationNullAnalysisOptions();
 		}
 	}
 

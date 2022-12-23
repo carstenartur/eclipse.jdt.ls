@@ -37,10 +37,13 @@ import org.eclipse.jdt.core.Signature;
 import org.eclipse.jdt.core.compiler.CharOperation;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.ASTRequestor;
+import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.IBinding;
 import org.eclipse.jdt.core.dom.ITypeBinding;
 import org.eclipse.jdt.core.dom.rewrite.ImportRewrite;
+import org.eclipse.jdt.core.manipulation.SharedASTProviderCore;
 import org.eclipse.jdt.internal.codeassist.CompletionEngine;
+import org.eclipse.jdt.internal.corext.codemanipulation.ContextSensitiveImportRewriteContext;
 import org.eclipse.jdt.internal.corext.dom.IASTSharedValues;
 import org.eclipse.jdt.internal.corext.template.java.SignatureUtil;
 import org.eclipse.jdt.ls.core.internal.ChangeUtil;
@@ -167,8 +170,8 @@ public class CompletionProposalReplacementProvider {
 				appendMethodOverrideReplacement(completionBuffer, proposal);
 				break;
 			case CompletionProposal.POTENTIAL_METHOD_DECLARATION:
-				if (proposal instanceof GetterSetterCompletionProposal) {
-					appendMethodPotentialReplacement(completionBuffer, (GetterSetterCompletionProposal) proposal);
+				if (proposal instanceof GetterSetterCompletionProposal getterSetterProposal) {
+					appendMethodPotentialReplacement(completionBuffer, getterSetterProposal);
 				} else {
 					appendReplacementString(completionBuffer, proposal);
 				}
@@ -213,9 +216,18 @@ public class CompletionProposalReplacementProvider {
 	}
 
 	private void appendLambdaExpressionReplacement(StringBuilder completionBuffer, CompletionProposal proposal) {
-		completionBuffer.append(LPAREN);
-		appendGuessingCompletion(completionBuffer, proposal);
-		completionBuffer.append(RPAREN);
+		StringBuilder paramBuffer = new StringBuilder();
+		appendGuessingCompletion(paramBuffer, proposal);
+		boolean needParens = paramBuffer.indexOf(",") > -1 || paramBuffer.length() == 0;
+
+		if (needParens) {
+			completionBuffer.append(LPAREN);
+		}
+		completionBuffer.append(paramBuffer);
+		if (needParens) {
+			completionBuffer.append(RPAREN);
+		}
+
 		completionBuffer.append(" -> ");
 		if(client.isCompletionSnippetsSupported()){
 			completionBuffer.append(CURSOR_POSITION);
@@ -988,8 +1000,7 @@ public class CompletionProposalReplacementProvider {
 		String prefix="";
 		try{
 			IDocument document = JsonRpcHelpers.toDocument(this.compilationUnit.getBuffer());
-			IRegion region= document.getLineInformationOfOffset(proposal.getReplaceEnd());
-			prefix =  document.get(region.getOffset(), proposal.getReplaceEnd() -region.getOffset()).trim();
+			prefix = document.get(proposal.getReplaceStart(), proposal.getReplaceEnd() - proposal.getReplaceStart());
 		}catch(BadLocationException | JavaModelException e){
 
 		}
@@ -1022,7 +1033,12 @@ public class CompletionProposalReplacementProvider {
 
 		/* Add imports if the preference is on. */
 		if (importRewrite != null) {
-			return importRewrite.addImport(qualifiedTypeName, null);
+			CompilationUnit cu = SharedASTProviderCore.getAST(compilationUnit, SharedASTProviderCore.WAIT_NO, new NullProgressMonitor());
+			ContextSensitiveImportRewriteContext rewriteContext = null;
+			if (cu != null) {
+				rewriteContext = new ContextSensitiveImportRewriteContext(cu, this.offset, this.importRewrite);
+			}
+			return importRewrite.addImport(qualifiedTypeName, rewriteContext);
 		}
 
 		// fall back for the case we don't have an import rewrite (see
