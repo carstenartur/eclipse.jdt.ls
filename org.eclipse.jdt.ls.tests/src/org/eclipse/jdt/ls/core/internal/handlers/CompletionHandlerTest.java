@@ -3162,6 +3162,106 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void testCompletion_IgnoreTypeFilterWhenImported1() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
+		//@formatter:off
+				"package org.sample;\n"
+			+	"import java.util.List;"	
+			+	"public class Test {\n\n"
+			+	"	void test() {\n\n"
+			+	"		List\n"
+			+	"	}\n"
+			+	"}\n");
+		//@formatter:on
+		try {
+			List<String> filteredTypes = new ArrayList<>();
+			filteredTypes.add("java.util.*");
+			PreferenceManager.getPrefs(null).setFilteredTypes(filteredTypes);
+
+			CompletionList list = requestCompletions(unit, "		List");
+			assertNotNull(list);
+			assertTrue(list.getItems().stream().anyMatch(t -> "java.util.List".equals(t.getDetail())));
+		} finally {
+			PreferenceManager.getPrefs(null).setFilteredTypes(Collections.emptyList());
+		}
+	}
+
+	@Test
+	public void testCompletion_IgnoreTypeFilterWhenImported2() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
+		//@formatter:off
+				"package org.sample;\n"
+			+	"import java.util.*;"	
+			+	"public class Test {\n\n"
+			+	"	void test() {\n\n"
+			+	"		List\n"
+			+	"	}\n"
+			+	"}\n");
+		//@formatter:on
+		try {
+			List<String> filteredTypes = new ArrayList<>();
+			filteredTypes.add("java.util.*");
+			PreferenceManager.getPrefs(null).setFilteredTypes(filteredTypes);
+
+			CompletionList list = requestCompletions(unit, "		List");
+			assertNotNull(list);
+			assertTrue(list.getItems().stream().anyMatch(t -> "java.util.List".equals(t.getDetail())));
+		} finally {
+			PreferenceManager.getPrefs(null).setFilteredTypes(Collections.emptyList());
+		}
+	}
+
+	@Test
+	public void testCompletion_IgnoreTypeFilterWhenImported3() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
+		//@formatter:off
+				"package org.sample;\n"
+			+	"import static java.util.List.*;"	
+			+	"public class Test {\n\n"
+			+	"	void test() {\n\n"
+			+	"		List\n"
+			+	"	}\n"
+			+	"}\n");
+		//@formatter:on
+		try {
+			List<String> filteredTypes = new ArrayList<>();
+			filteredTypes.add("java.util.*");
+			PreferenceManager.getPrefs(null).setFilteredTypes(filteredTypes);
+
+			CompletionList list = requestCompletions(unit, "		List");
+			assertNotNull(list);
+			assertTrue(list.getItems().stream().anyMatch(t -> "java.util.List".equals(t.getDetail())));
+		} finally {
+			PreferenceManager.getPrefs(null).setFilteredTypes(Collections.emptyList());
+		}
+	}
+
+	@Test
+	public void testCompletion_IgnoreTypeFilterWhenImported4() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
+		//@formatter:off
+				"package org.sample;\n"
+			+	"import static java.util.List.DUMMY;"	
+			+	"public class Test {\n\n"
+			+	"	void test() {\n\n"
+			+	"		List\n"
+			+	"	}\n"
+			+	"}\n");
+		//@formatter:on
+		try {
+			List<String> filteredTypes = new ArrayList<>();
+			filteredTypes.add("java.util.*");
+			PreferenceManager.getPrefs(null).setFilteredTypes(filteredTypes);
+
+			CompletionList list = requestCompletions(unit, "		List");
+			assertNotNull(list);
+			assertTrue(list.getItems().stream().anyMatch(t -> "java.util.List".equals(t.getDetail())));
+		} finally {
+			PreferenceManager.getPrefs(null).setFilteredTypes(Collections.emptyList());
+		}
+	}
+
+	@Test
 	public void testCompletion_InvalidJavadoc() throws Exception {
 		importProjects("maven/aspose");
 		IProject project = null;
@@ -3504,7 +3604,10 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
-	public void testCompletion_withConflictingTypeNames() throws Exception{
+	public void testCompletion_withConflictingTypeNames() throws Exception {
+		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
+		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
+		Mockito.when(mockCapabilies.isResolveAdditionalTextEditsSupport()).thenReturn(true);
 		getWorkingCopy("src/java/List.java",
 			"package util;\n" +
 			"public class List {\n" +
@@ -3528,7 +3631,8 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		List<CompletionItem> items = list.getItems().stream().filter(p -> "java.util.List".equals(p.getDetail()))
 			.collect(Collectors.toList());
 		assertFalse("java.util.List not found",items.isEmpty());
-		assertEquals("java.util.List", items.get(0).getTextEdit().getLeft().getNewText());
+		CompletionItem resolved = server.resolveCompletionItem(list.getItems().get(0)).join();
+		assertEquals("java.util.List", resolved.getTextEdit().getLeft().getNewText());
 	}
 
 	@Test
