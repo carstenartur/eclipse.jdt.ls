@@ -11,3 +11,7 @@ updates:
       interval: "daily"
     ignore:
       - dependency-name: "junit:junit" # Ignore from sample test projects
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: daily
