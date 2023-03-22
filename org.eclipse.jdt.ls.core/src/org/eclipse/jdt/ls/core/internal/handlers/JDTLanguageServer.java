@@ -46,6 +46,7 @@ import org.eclipse.jdt.ls.core.internal.JavaClientConnection;
 import org.eclipse.jdt.ls.core.internal.JavaClientConnection.JavaLanguageClient;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 import org.eclipse.jdt.ls.core.internal.JobHelpers;
+import org.eclipse.jdt.ls.core.internal.LanguageServerApplication;
 import org.eclipse.jdt.ls.core.internal.LanguageServerWorkingCopyOwner;
 import org.eclipse.jdt.ls.core.internal.ServiceStatus;
 import org.eclipse.jdt.ls.core.internal.codemanipulation.GenerateGetterSetterOperation.AccessorField;
@@ -119,8 +120,11 @@ import org.eclipse.lsp4j.ImplementationParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.InitializedParams;
+import org.eclipse.lsp4j.InlayHint;
+import org.eclipse.lsp4j.InlayHintParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
+import org.eclipse.lsp4j.PrepareRenameDefaultBehavior;
 import org.eclipse.lsp4j.PrepareRenameParams;
 import org.eclipse.lsp4j.PrepareRenameResult;
 import org.eclipse.lsp4j.Range;
@@ -139,16 +143,16 @@ import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.TypeDefinitionParams;
 import org.eclipse.lsp4j.WillSaveTextDocumentParams;
 import org.eclipse.lsp4j.WorkspaceEdit;
+import org.eclipse.lsp4j.WorkspaceSymbol;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.extended.ProjectBuildParams;
 import org.eclipse.lsp4j.extended.ProjectConfigurationsUpdateParam;
 import org.eclipse.lsp4j.jsonrpc.CompletableFutures;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.jsonrpc.messages.Either3;
 import org.eclipse.lsp4j.jsonrpc.services.JsonDelegate;
-import org.eclipse.lsp4j.proposed.InlayHint;
-import org.eclipse.lsp4j.proposed.InlayHintParams;
-import org.eclipse.lsp4j.proposed.InlayHintProvider;
 import org.eclipse.lsp4j.services.LanguageServer;
+import org.eclipse.lsp4j.services.NotebookDocumentService;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
@@ -157,7 +161,7 @@ import org.eclipse.lsp4j.services.WorkspaceService;
  *
  */
 public class JDTLanguageServer extends BaseJDTLanguageServer implements LanguageServer, TextDocumentService, WorkspaceService,
-		JavaProtocolExtensions, InlayHintProvider {
+		JavaProtocolExtensions {
 
 	public static final String JAVA_LSP_JOIN_ON_COMPLETION = "java.lsp.joinOnCompletion";
 	public static final String JAVA_LSP_INITIALIZE_WORKSPACE = "java.lsp.initializeWorkspace";
@@ -268,10 +272,7 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 			@Override
 			public IStatus run(IProgressMonitor monitor) {
 				try {
-					JobHelpers.waitForBuildJobs(60 * 60 * 1000); // 1 hour
-					logInfo(">> build jobs finished");
 					workspaceDiagnosticsHandler = new WorkspaceDiagnosticsHandler(JDTLanguageServer.this.client, pm, preferenceManager.getClientPreferences(), documentLifeCycleHandler);
-					workspaceDiagnosticsHandler.publishDiagnostics(monitor);
 					workspaceDiagnosticsHandler.addResourceChangeListener();
 					classpathUpdateHandler = new ClasspathUpdateHandler(JDTLanguageServer.this.client);
 					classpathUpdateHandler.addElementChangeListener();
@@ -291,6 +292,9 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 					pm.projectsImported(monitor);
 
 					IndexUtils.copyIndexesToSharedLocation();
+					JobHelpers.waitForBuildJobs(60 * 60 * 1000); // 1 hour
+					logInfo(">> build jobs finished");
+					workspaceDiagnosticsHandler.publishDiagnostics(monitor);
 				} catch (OperationCanceledException | CoreException e) {
 					logException(e.getMessage(), e);
 					return Status.CANCEL_STATUS;
@@ -339,6 +343,9 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 		}
 		if (preferenceManager.getClientPreferences().isImplementationDynamicRegistered()) {
 			registerCapability(Preferences.IMPLEMENTATION_ID, Preferences.IMPLEMENTATION);
+		}
+		if (preferenceManager.getClientPreferences().isInlayHintDynamicRegistered()) {
+			registerCapability(Preferences.INLAY_HINT_ID, Preferences.INLAY_HINT);
 		}
 	}
 
@@ -442,10 +449,13 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	@Override
 	public void exit() {
 		logInfo(">> exit");
-		Executors.newSingleThreadScheduledExecutor().schedule(() -> {
-			logInfo("Forcing exit after 1 min.");
-			System.exit(FORCED_EXIT_CODE);
-		}, 1, TimeUnit.MINUTES);
+		LanguageServerApplication application = JavaLanguageServerPlugin.getLanguageServer();
+		if (application != null && application.getParentProcessId() != ProcessHandle.current().pid()) {
+			Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+				logInfo("Forcing exit after 1 min.");
+				System.exit(FORCED_EXIT_CODE);
+			}, 1, TimeUnit.MINUTES);
+		}
 		if (!shutdownReceived) {
 			shutdownJob.schedule();
 		}
@@ -482,10 +492,10 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	 * @see org.eclipse.lsp4j.services.WorkspaceService#symbol(org.eclipse.lsp4j.WorkspaceSymbolParams)
 	 */
 	@Override
-	public CompletableFuture<List<? extends SymbolInformation>> symbol(WorkspaceSymbolParams params) {
+	public CompletableFuture<Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>>> symbol(WorkspaceSymbolParams params) {
 		logInfo(">> workspace/symbol");
 		return computeAsync((monitor) -> {
-			return WorkspaceSymbolHandler.search(params.getQuery(), monitor);
+			return Either.forLeft(WorkspaceSymbolHandler.search(params.getQuery(), monitor));
 		});
 	}
 
@@ -788,12 +798,12 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 	 * @see org.eclipse.lsp4j.services.TextDocumentService#prepareRename(org.eclipse.lsp4j.PrepareRenameParams)
 	 */
 	@Override
-	public CompletableFuture<Either<Range, PrepareRenameResult>> prepareRename(PrepareRenameParams params) {
+	public CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> prepareRename(PrepareRenameParams params) {
 		logInfo(">> document/prepareRename");
 		PrepareRenameHandler handler = new PrepareRenameHandler(preferenceManager);
 		return computeAsync((monitor) -> {
 			waitForLifecycleJobs(monitor);
-			return handler.prepareRename(params, monitor);
+			return Either3.forLeft3(handler.prepareRename(params, monitor));
 		});
 	}
 
@@ -1112,4 +1122,11 @@ public class JDTLanguageServer extends BaseJDTLanguageServer implements Language
 		JobHelpers.waitForJobs(DocumentLifeCycleHandler.DOCUMENT_LIFE_CYCLE_JOBS, monitor);
 	}
 
+	/* (non-Javadoc)
+	 * @see org.eclipse.lsp4j.services.LanguageServer#getNotebookDocumentService()
+	 */
+	@Override
+	public NotebookDocumentService getNotebookDocumentService() {
+		return null;
+	}
 }

@@ -514,6 +514,7 @@ public class Preferences {
 	public static final String WORKSPACE_CHANGE_FOLDERS = "workspace/didChangeWorkspaceFolders";
 	public static final String IMPLEMENTATION = "textDocument/implementation";
 	public static final String SELECTION_RANGE = "textDocument/selectionRange";
+	public static final String INLAY_HINT = "textDocument/inlayHint";
 
 	public static final String FORMATTING_ID = UUID.randomUUID().toString();
 	public static final String FORMATTING_ON_TYPE_ID = UUID.randomUUID().toString();
@@ -536,6 +537,7 @@ public class Preferences {
 	public static final String WORKSPACE_WATCHED_FILES_ID = UUID.randomUUID().toString();
 	public static final String IMPLEMENTATION_ID = UUID.randomUUID().toString();
 	public static final String SELECTION_RANGE_ID = UUID.randomUUID().toString();
+	public static final String INLAY_HINT_ID = UUID.randomUUID().toString();
 	private static final String GRADLE_OFFLINE_MODE = "gradle.offline.mode";
 	private static final int DEFAULT_TAB_SIZE = 4;
 
@@ -2277,22 +2279,16 @@ public class Preferences {
 								}
 							}
 						}
+						String aType = findTypeInProject(javaProject, annotationType, classpathStorage);
+						if (aType != null) {
+							return aType;
+						}
 					} else {
 						// for unknown types, try to find type in the project
 						try {
-							IType type = javaProject.findType(annotationType);
-							if (type != null) {
-								IJavaElement fragmentRoot = type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
-								IClasspathEntry classpathEntry = javaProject.getClasspathEntryFor(fragmentRoot.getPath());
-								if (classpathEntry == null || !classpathEntry.isTest()) {
-									String classpath = fragmentRoot.getPath().toOSString();
-									if (classpathStorage.containsKey(annotationType)) {
-										classpathStorage.get(annotationType).add(classpath);
-									} else {
-										classpathStorage.put(annotationType, new ArrayList<>(Arrays.asList(classpath)));
-									}
-									return annotationType;
-								}
+							String aType = findTypeInProject(javaProject, annotationType, classpathStorage);
+							if (aType != null) {
+								return aType;
 							}
 						} catch (JavaModelException e) {
 							continue;
@@ -2301,6 +2297,24 @@ public class Preferences {
 				}
 			} catch (CoreException | URISyntaxException e) {
 				JavaLanguageServerPlugin.logException(e);
+			}
+		}
+		return null;
+	}
+
+	private String findTypeInProject(IJavaProject javaProject, String annotationType, Map<String, List<String>> classpathStorage) throws JavaModelException {
+		IType type = javaProject.findType(annotationType);
+		if (type != null) {
+			IJavaElement fragmentRoot = type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+			IClasspathEntry classpathEntry = javaProject.getClasspathEntryFor(fragmentRoot.getPath());
+			if (classpathEntry == null || !classpathEntry.isTest()) {
+				String classpath = fragmentRoot.getPath().toOSString();
+				if (classpathStorage.containsKey(annotationType)) {
+					classpathStorage.get(annotationType).add(classpath);
+				} else {
+					classpathStorage.put(annotationType, new ArrayList<>(Arrays.asList(classpath)));
+				}
+				return annotationType;
 			}
 		}
 		return null;

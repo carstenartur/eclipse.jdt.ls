@@ -15,6 +15,7 @@ package org.eclipse.jdt.ls.core.internal.preferences;
 import static org.apache.commons.lang3.BooleanUtils.isTrue;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -163,6 +164,10 @@ public class ClientPreferences {
 		return v3supported && isDynamicRegistrationSupported(capabilities.getTextDocument().getSelectionRange());
 	}
 
+	public boolean isInlayHintDynamicRegistered() {
+		return v3supported && isDynamicRegistrationSupported(capabilities.getTextDocument().getInlayHint());
+	}
+
 	public boolean isWillSaveRegistered() {
 		return v3supported && capabilities.getTextDocument().getSynchronization() != null && isTrue(capabilities.getTextDocument().getSynchronization().getWillSave());
 	}
@@ -287,11 +292,6 @@ public class ClientPreferences {
 		//@formatter:on
 	}
 
-	@Deprecated
-	public boolean isWorkspaceEditResourceChangesSupported() {
-		return capabilities.getWorkspace() != null && capabilities.getWorkspace().getWorkspaceEdit() != null && isTrue(capabilities.getWorkspace().getWorkspaceEdit().getResourceChanges());
-	}
-
 	public boolean isResourceOperationSupported() {
 		//@formatter:off
 		return capabilities.getWorkspace() != null
@@ -384,6 +384,27 @@ public class ClientPreferences {
 			&& capabilities.getTextDocument().getCompletion().getCompletionItem() != null
 			&& capabilities.getTextDocument().getCompletion().getCompletionItem().getInsertReplaceSupport() != null
 			&& capabilities.getTextDocument().getCompletion().getCompletionItem().getInsertReplaceSupport().booleanValue();
+	}
+
+	public boolean isInlayHintRefreshSupported() {
+		return v3supported
+			&& capabilities.getWorkspace().getInlayHint() != null
+			&& capabilities.getWorkspace().getInlayHint().getRefreshSupport() != null
+			&& capabilities.getWorkspace().getInlayHint().getRefreshSupport().booleanValue();
+	}
+
+	public Collection<String> excludedMarkerTypes() {
+		Object list = extendedClientCapabilities.getOrDefault("excludedMarkerTypes", null);
+		return list instanceof Collection<?> excludedMarkerTypes //
+				? excludedMarkerTypes.stream().filter(String.class::isInstance).map(String.class::cast).toList() //
+				: List.of();
+	}
+
+	public boolean isChangeAnnotationSupport() {
+		return v3supported
+			&& capabilities.getWorkspace() != null
+			&& capabilities.getWorkspace().getWorkspaceEdit() != null
+			&& capabilities.getWorkspace().getWorkspaceEdit().getChangeAnnotationSupport() != null;
 	}
 
 }
