@@ -224,6 +224,10 @@ public class ClientPreferences {
 		return Boolean.parseBoolean(extendedClientCapabilities.getOrDefault("extractInterfaceSupport", "false").toString());
 	}
 
+	public boolean isAdvancedUpgradeGradleSupport() {
+		return Boolean.parseBoolean(extendedClientCapabilities.getOrDefault("advancedUpgradeGradleSupport", "false").toString());
+	}
+
 	public boolean isExtractMethodInferSelectionSupported() {
 		Object supportList = extendedClientCapabilities.getOrDefault("inferSelectionSupport", new ArrayList<>());
 		return supportList instanceof List<?> list && list.contains("extractMethod");
@@ -400,6 +404,10 @@ public class ClientPreferences {
 			&& capabilities.getTextDocument().getCompletion().getCompletionList() != null
 			&& capabilities.getTextDocument().getCompletion().getCompletionList().getItemDefaults() != null
 			&& capabilities.getTextDocument().getCompletion().getCompletionList().getItemDefaults().contains("insertTextFormat");
+	}
+
+	public boolean isCompletionListItemDefaultsSupport() {
+		return isCompletionListItemDefaultsEditRangeSupport() || isCompletionListItemDefaultsInsertTextFormatSupport();
 	}
 
 	public boolean isInlayHintRefreshSupported() {
