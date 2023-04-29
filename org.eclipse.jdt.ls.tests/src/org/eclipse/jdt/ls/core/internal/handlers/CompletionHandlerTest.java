@@ -73,6 +73,7 @@ import org.eclipse.lsp4j.InsertReplaceEdit;
 import org.eclipse.lsp4j.InsertTextFormat;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextEdit;
@@ -123,6 +124,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		javaClient = new JavaClientConnection(client);
 		lifeCycleHandler = new DocumentLifeCycleHandler(javaClient, preferenceManager, projectsManager, true);
 		preferences.setPostfixCompletionEnabled(false);
+		preferences.setCompletionLazyResolveTextEditEnabled(true);
 	}
 
 	@After
@@ -132,6 +134,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 
 	@Test
 	public void testCompletion_javadoc() throws Exception {
+		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
+		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		IJavaProject javaProject = JavaCore.create(project);
 		ICompilationUnit unit = (ICompilationUnit) javaProject.findElement(new Path("org/sample/TestJavadoc.java"));
 		unit.becomeWorkingCopy(null);
@@ -163,6 +168,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
 		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
 		Mockito.when(mockCapabilies.isSupportsCompletionDocumentationMarkdown()).thenReturn(true);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		ICompilationUnit unit = (ICompilationUnit) javaProject.findElement(new Path("org/sample/TestJavadoc.java"));
 		unit.becomeWorkingCopy(null);
 		String joinOnCompletion = System.getProperty(JDTLanguageServer.JAVA_LSP_JOIN_ON_COMPLETION);
@@ -259,7 +265,6 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 			@SuppressWarnings("unchecked")
 			Map<String,String> data = (Map<String, String>) item.getData();
 			assertNotNull(data);
-			assertTrue(isNotBlank(data.get(CompletionResolveHandler.DATA_FIELD_URI)));
 			assertTrue(isNotBlank(data.get(CompletionResolveHandler.DATA_FIELD_PROPOSAL_ID)));
 			assertTrue(isNotBlank(data.get(CompletionResolveHandler.DATA_FIELD_REQUEST_ID)));
 		}
@@ -278,15 +283,13 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		assertNotNull(list);
 		assertFalse("No proposals were found",list.getItems().isEmpty());
 
-		List<CompletionItem> items = new ArrayList<>(list.getItems());
-		for ( CompletionItem item : items) {
-			@SuppressWarnings("unchecked")
-			Map<String,String> data = (Map<String, String>) item.getData();
-			assertNotNull(data);
-			String uri = data.get(CompletionResolveHandler.DATA_FIELD_URI);
-			assertTrue(isNotBlank(uri));
-			assertTrue("unexpected URI prefix: " + uri, uri.matches("file://.*/src/java/Foo\\.java"));
-		}
+		Map<String,String> data = (Map<String, String>) list.getItems().get(0).getData();
+		long requestId = Long.parseLong(data.get(CompletionResolveHandler.DATA_FIELD_REQUEST_ID));
+		CompletionResponse completionResponse = CompletionResponses.get(requestId);
+		assertNotNull(completionResponse);
+		String uri = completionResponse.getUri();
+		assertNotNull(uri);
+		assertTrue("unexpected URI prefix: " + uri, uri.matches("file://.*/src/java/Foo\\.java"));
 	}
 
 
@@ -1027,6 +1030,35 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void testSnippet_NonLazyResolve() throws JavaModelException {
+		try {
+			preferences.setCompletionLazyResolveTextEditEnabled(false);
+			//@formatter:off
+			ICompilationUnit unit = getWorkingCopy(
+				"src/org/sample/Test.java",
+				"package org.sample;\n" +
+				"public class Test {\n" +
+				"	public void testMethod() {\n" +
+				"		sysout" +
+				"	}\n" +
+				"}"
+			);
+			//@formatter:on
+			CompletionList list = requestCompletions(unit, "sysout");
+
+			assertNotNull(list);
+
+			List<CompletionItem> items = new ArrayList<>(list.getItems());
+			CompletionItem item = items.get(0);
+			assertEquals("sysout", item.getLabel());
+			String newText = item.getTextEdit().getLeft().getNewText();
+			assertEquals("System.out.println(${0});", newText);
+		} finally {
+			preferences.setCompletionLazyResolveTextEditEnabled(true);
+		}
+	}
+
+	@Test
 	public void testSnippet_sysout() throws JavaModelException {
 		//@formatter:off
 		ICompilationUnit unit = getWorkingCopy(
@@ -1071,7 +1103,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		for (CompletionItem item : items) {
 			if (CompletionItemKind.Snippet.equals(item.getKind()) && "sout".equals(item.getLabel())) {
 				String insertText = item.getInsertText();
-		assertEquals("System.out.println(${0});", insertText);
+				assertEquals("System.out.println(${0});", insertText);
 				return;
 			}
 		}
@@ -2561,6 +2593,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 
 	@Test
 	public void testCompletion_testMethodWithParams() throws Exception {
+		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
+		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		ICompilationUnit unit = getWorkingCopy(
 		//@formatter:off
 		"src/org/sample/Test.java",
@@ -3030,6 +3065,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
 		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
 		Mockito.when(mockCapabilies.isSupportsCompletionDocumentationMarkdown()).thenReturn(true);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		Mockito.lenient().when(mockCapabilies.isClassFileContentSupported()).thenReturn(true);
 
 		//@formatter:off
@@ -3446,6 +3482,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 
 	@Test
 	public void testCompletion_ConstantDefaultValue() throws JavaModelException {
+		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
+		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
 		//@formatter:off
 				"package org.sample;\n"
@@ -3486,6 +3525,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 	// See https://github.com/redhat-developer/vscode-java/issues/1258
 	@Test
 	public void testCompletion_javadocOriginal() throws JavaModelException {
+		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
+		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
+		Mockito.when(mockCapabilies.isCompletionResolveDocumentSupport()).thenReturn(true);
 		ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java",
 		//@formatter:off
 				"package org.sample;\n"
@@ -3941,6 +3983,28 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		}
 	}
 
+	@Test
+	public void testCompletion_syserrSnipper() throws JavaModelException {
+		preferenceManager.getPreferences().setCompletionLazyResolveTextEditEnabled(false);
+		ICompilationUnit unit = getWorkingCopy(
+		//@formatter:off
+		"src/java/Foo.java",
+		"""
+		public class Foo {
+			void f() {
+				syser
+			} 
+		};
+		""");
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "syser");
+		assertNotNull(list);
+		assertEquals(1, list.getItems().size());
+		CompletionItem item = list.getItems().get(0);
+		assertEquals("syserr", item.getLabel());
+		assertEquals(new Range(new Position(2, 2), new Position(2, 7)), item.getTextEdit().map(TextEdit::getRange, InsertReplaceEdit::getReplace));
+	}
+
 	private CompletionList requestCompletions(ICompilationUnit unit, String completeBehind) throws JavaModelException {
 		return requestCompletions(unit, completeBehind, 0);
 	}
@@ -3964,9 +4028,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		mockLSPClient(false, false);
 	}
 
-	private void mockLSPClient(boolean isSnippetSupported, boolean isSignatureHelpSuported) {
+	private void mockLSPClient(boolean isSnippetSupported, boolean isSignatureHelpSupported) {
 		// Mock the preference manager to use LSP v3 support.
 		when(preferenceManager.getClientPreferences().isCompletionSnippetsSupported()).thenReturn(isSnippetSupported);
-		when(preferenceManager.getClientPreferences().isSignatureHelpSupported()).thenReturn(isSignatureHelpSuported);
+		when(preferenceManager.getClientPreferences().isSignatureHelpSupported()).thenReturn(isSignatureHelpSupported);
 	}
 }

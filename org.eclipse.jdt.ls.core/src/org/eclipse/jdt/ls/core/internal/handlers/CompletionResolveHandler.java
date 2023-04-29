@@ -47,6 +47,9 @@ import org.eclipse.jdt.ls.core.internal.contentassist.CompletionProposalReplacem
 import org.eclipse.jdt.ls.core.internal.contentassist.CompletionProposalRequestor;
 import org.eclipse.jdt.ls.core.internal.contentassist.SnippetCompletionProposal;
 import org.eclipse.jdt.ls.core.internal.contentassist.SnippetUtils;
+import org.eclipse.jdt.ls.core.internal.corext.template.java.JavaPostfixContext;
+import org.eclipse.jdt.ls.core.internal.corext.template.java.PostfixCompletionProposal;
+import org.eclipse.jdt.ls.core.internal.corext.template.java.PostfixTemplateEngine;
 import org.eclipse.jdt.ls.core.internal.javadoc.JavadocContentAccess;
 import org.eclipse.jdt.ls.core.internal.javadoc.JavadocContentAccess2;
 import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
@@ -84,7 +87,6 @@ public class CompletionResolveHandler {
 		this.manager = manager;
 	}
 
-	public static final String DATA_FIELD_URI = "uri";
 	public static final String DATA_FIELD_DECLARATION_SIGNATURE = "decl_signature";
 	public static final String DATA_FIELD_SIGNATURE= "signature";
 	public static final String DATA_FIELD_NAME = "name";
@@ -99,7 +101,7 @@ public class CompletionResolveHandler {
 		Map<String, String> data = JSONUtility.toModel(param.getData(),Map.class);
 		// clean resolve data
 		param.setData(null);
-		if (!CompletionProposalRequestor.SUPPORTED_KINDS.contains(param.getKind()) || data == null || !data.containsKey(DATA_FIELD_URI) || !data.containsKey(DATA_FIELD_REQUEST_ID) || !data.containsKey(DATA_FIELD_PROPOSAL_ID)) {
+		if (!CompletionProposalRequestor.SUPPORTED_KINDS.contains(param.getKind()) || data == null || !data.containsKey(DATA_FIELD_REQUEST_ID) || !data.containsKey(DATA_FIELD_PROPOSAL_ID)) {
 			return param;
 		}
 		int proposalId = Integer.parseInt(data.get(DATA_FIELD_PROPOSAL_ID));
@@ -108,7 +110,8 @@ public class CompletionResolveHandler {
 		if (completionResponse == null || completionResponse.getProposals().size() <= proposalId) {
 			throw new IllegalStateException("Invalid completion proposal");
 		}
-		String uri = data.get(DATA_FIELD_URI);
+
+		String uri = completionResponse.getUri();
 		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(uri);
 		if (unit == null) {
 			throw new IllegalStateException(NLS.bind("Unable to match Compilation Unit from {0} ", uri));
@@ -123,13 +126,41 @@ public class CompletionResolveHandler {
 			try {
 				CompletionContext ctx = completionResponse.getContext();
 				CompletionProposal proposal = completionResponse.getProposals().get(proposalId);
-				Template template = ((SnippetCompletionProposal) proposal).getTemplate();
-				String content = SnippetCompletionProposal.evaluateGenericTemplate(unit, ctx, template);
+				if (proposal instanceof SnippetCompletionProposal) {
+					Template template = ((SnippetCompletionProposal) proposal).getTemplate();
+					String content = SnippetCompletionProposal.evaluateGenericTemplate(unit, ctx, template);
+					if (manager.getClientPreferences().isCompletionResolveDocumentSupport()) {
+						param.setDocumentation(SnippetUtils.beautifyDocument(content));
+					}
+	
+					if (manager.getPreferences().isCompletionLazyResolveTextEditEnabled()) {
+						SnippetCompletionProposal.setTextEdit(ctx, unit, param, content);
+					}
+				} else if (proposal instanceof PostfixCompletionProposal) {
+					JavaPostfixContext postfixContext = ((PostfixCompletionProposal) proposal).getContext();
+					Template template = ((PostfixCompletionProposal) proposal).getTemplate();
+					postfixContext.setActiveTemplateName(template.getName());
+					String content = PostfixTemplateEngine.evaluateGenericTemplate(postfixContext, template);
+					int length = postfixContext.getEnd() - postfixContext.getStart();
+					Range range = JDTUtils.toRange(unit, postfixContext.getStart(), length);
+					if (manager.getPreferences().isCompletionLazyResolveTextEditEnabled()) {
+						TextEdit textEdit = new TextEdit(range, content);
+						param.setTextEdit(Either.forLeft(textEdit));
+					}
 
-				Range range = JDTUtils.toRange(unit, ctx.getOffset(), 0);
-				TextEdit textEdit = new TextEdit(range, content);
-				param.setTextEdit(Either.forLeft(textEdit));
-				param.setDocumentation(SnippetUtils.beautifyDocument(content));
+					if (manager.getClientPreferences().isCompletionResolveDocumentSupport()) {
+						param.setDocumentation(SnippetUtils.beautifyDocument(content));
+					}
+
+					if (manager.getClientPreferences().isCompletionResolveDocumentSupport()) {
+						param.setDetail(template.getDescription());
+					}
+
+					if (manager.getClientPreferences().isResolveAdditionalTextEditsSupport()) {
+						PostfixTemplateEngine.setAdditionalTextEdit(param, unit, postfixContext, range, template);
+					}
+				}
+	
 				param.setData(null);
 			} catch (JavaModelException e) {
 				JavaLanguageServerPlugin.logException(e.getMessage(), e);
@@ -148,6 +179,12 @@ public class CompletionResolveHandler {
 			);
 			proposalProvider.updateReplacement(completionResponse.getProposals().get(proposalId), param, '\0');
 		}
+
+		if (!manager.getClientPreferences().isCompletionResolveDocumentSupport()) {
+			return param;
+		}
+
+		// below code is for resolving documentation
 		if (data.containsKey(DATA_FIELD_DECLARATION_SIGNATURE)) {
 			String typeName = stripSignatureToFQN(String.valueOf(data.get(DATA_FIELD_DECLARATION_SIGNATURE)));
 			try {

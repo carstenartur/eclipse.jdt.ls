@@ -26,15 +26,16 @@ import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.internal.corext.fix.LinkedProposalModelCore;
 import org.eclipse.jdt.internal.corext.fix.LinkedProposalPositionGroupCore;
 import org.eclipse.jdt.internal.corext.fix.LinkedProposalPositionGroupCore.PositionInformation;
+import org.eclipse.jdt.internal.corext.refactoring.ParameterInfo;
 import org.eclipse.jdt.internal.ui.text.correction.IProblemLocationCore;
 import org.eclipse.jdt.ls.core.internal.ChangeUtil;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
 import org.eclipse.jdt.ls.core.internal.JSONUtility;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
-import org.eclipse.jdt.ls.core.internal.corext.refactoring.ParameterInfo;
 import org.eclipse.jdt.ls.core.internal.corext.refactoring.code.IntroduceParameterRefactoring;
 import org.eclipse.jdt.ls.core.internal.corrections.DiagnosticsHelper;
 import org.eclipse.jdt.ls.core.internal.corrections.IInvocationContext;
@@ -67,7 +68,11 @@ public class GetRefactorEditHandler {
 		int start = DiagnosticsHelper.getStartOffset(unit, params.context.getRange());
 		int end = DiagnosticsHelper.getEndOffset(unit, params.context.getRange());
 		InnovationContext context = new InnovationContext(unit, start, end - start);
-		context.setASTRoot(CodeActionHandler.getASTRoot(unit));
+		CompilationUnit ast = CodeActionHandler.getASTRoot(unit);
+		if (ast == null) {
+			return null;
+		}
+		context.setASTRoot(ast);
 		IProblemLocationCore[] locations = CodeActionHandler.getProblemLocationCores(unit, params.context.getContext().getDiagnostics());
 		boolean problemsAtLocation = locations.length != 0;
 		String positionKey = DEFAULT_POSITION_KEY;
