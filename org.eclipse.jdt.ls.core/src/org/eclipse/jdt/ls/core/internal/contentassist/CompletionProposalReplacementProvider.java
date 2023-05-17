@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
@@ -61,6 +62,7 @@ import org.eclipse.jface.text.IRegion;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.InsertReplaceEdit;
 import org.eclipse.lsp4j.InsertTextFormat;
+import org.eclipse.lsp4j.InsertTextMode;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.text.edits.TextEdit;
@@ -160,27 +162,33 @@ public class CompletionProposalReplacementProvider {
 
 		setInsertReplaceRange(proposal, insertReplaceEdit);
 
-		switch (proposal.getKind()) {
-			case CompletionProposal.METHOD_DECLARATION:
-				appendMethodOverrideReplacement(completionBuffer, proposal);
-				break;
-			case CompletionProposal.POTENTIAL_METHOD_DECLARATION:
-				if (proposal instanceof GetterSetterCompletionProposal getterSetterProposal) {
-					appendMethodPotentialReplacement(completionBuffer, getterSetterProposal);
-				} else {
+		if (preferences.isCompletionLazyResolveTextEditEnabled() && !isResolvingRequest) {
+			if (completionBuffer.isEmpty()) {
+				completionBuffer.append(getDefaultTextEditText(item));
+			}
+		} else {
+			switch (proposal.getKind()) {
+				case CompletionProposal.METHOD_DECLARATION:
+					appendMethodOverrideReplacement(completionBuffer, proposal);
+					break;
+				case CompletionProposal.POTENTIAL_METHOD_DECLARATION:
+					if (proposal instanceof GetterSetterCompletionProposal getterSetterProposal) {
+						appendMethodPotentialReplacement(completionBuffer, getterSetterProposal);
+					} else {
+						appendReplacementString(completionBuffer, proposal);
+					}
+					break;
+				case CompletionProposal.ANONYMOUS_CLASS_CONSTRUCTOR_INVOCATION:
+				case CompletionProposal.ANONYMOUS_CLASS_DECLARATION:
+					appendAnonymousClass(completionBuffer, proposal, insertReplaceEdit);
+					break;
+				case CompletionProposal.LAMBDA_EXPRESSION:
+					appendLambdaExpressionReplacement(completionBuffer, proposal);
+					break;
+				default:
 					appendReplacementString(completionBuffer, proposal);
-				}
-				break;
-			case CompletionProposal.ANONYMOUS_CLASS_CONSTRUCTOR_INVOCATION:
-			case CompletionProposal.ANONYMOUS_CLASS_DECLARATION:
-				appendAnonymousClass(completionBuffer, proposal, insertReplaceEdit);
-				break;
-			case CompletionProposal.LAMBDA_EXPRESSION:
-				appendLambdaExpressionReplacement(completionBuffer, proposal);
-				break;
-			default:
-				appendReplacementString(completionBuffer, proposal);
-				break;
+					break;
+			}
 		}
 
 		//select insertTextFormat.
@@ -188,6 +196,10 @@ public class CompletionProposalReplacementProvider {
 			item.setInsertTextFormat(InsertTextFormat.Snippet);
 		} else {
 			item.setInsertTextFormat(InsertTextFormat.PlainText);
+		}
+		if (isResolvingRequest || (!JavaLanguageServerPlugin.getPreferencesManager().getClientPreferences().isCompletionListItemDefaultsPropertySupport("insertTextMode")
+				&& JavaLanguageServerPlugin.getPreferencesManager().getClientPreferences().getCompletionItemInsertTextModeDefault() != InsertTextMode.AdjustIndentation)) {
+			item.setInsertTextMode(InsertTextMode.AdjustIndentation);
 		}
 		String text = completionBuffer.toString();
 		if (insertReplaceEdit.getReplace() == null || insertReplaceEdit.getInsert() == null) {
@@ -212,6 +224,22 @@ public class CompletionProposalReplacementProvider {
 				item.setAdditionalTextEdits(additionalTextEdits);
 			}
 		}
+	}
+
+	/**
+	 * Return a default text edit text (more like a placeholder). And let it
+	 * be corrected in completionItem/resolve request.
+	 */
+	private String getDefaultTextEditText(CompletionItem item) {
+		if (StringUtils.isNotBlank(item.getInsertText())) {
+			return item.getInsertText();
+		}
+
+		if (StringUtils.isNotBlank(item.getLabel())) {
+			return item.getLabel();
+		}
+
+		return "";
 	}
 
 	private void appendLambdaExpressionReplacement(StringBuilder completionBuffer, CompletionProposal proposal) {
@@ -481,12 +509,36 @@ public class CompletionProposalReplacementProvider {
 	}
 
 	private void appendReplacementString(StringBuilder buffer, CompletionProposal proposal) {
+		final boolean completionSnippetsSupported = client.isCompletionSnippetsSupported();
 		if (!hasArgumentList(proposal)) {
-			String str = proposal.getKind() == CompletionProposal.TYPE_REF ? computeJavaTypeReplacementString(proposal) : String.valueOf(proposal.getCompletion());
-			if (client.isCompletionSnippetsSupported()) {
-				str = CompletionUtils.sanitizeCompletion(str);
-				if (proposal.getKind() == CompletionProposal.PACKAGE_REF && str != null && str.endsWith(".*;")) {
-					str = str.replace(".*;", ".${0:*};");
+			String str = null;
+			if (proposal.getKind() == CompletionProposal.TYPE_REF) {
+				str = computeJavaTypeReplacementString(proposal);
+				if (completionSnippetsSupported) {
+					str = CompletionUtils.sanitizeCompletion(str);
+				}
+
+				if (proposal.getArrayDimensions() > 0) {
+					StringBuilder arrayString = new StringBuilder(str);
+					for (int i = 0; i < proposal.getArrayDimensions(); i++) {
+						arrayString.append("[");
+						if (completionSnippetsSupported) {
+							arrayString.append("$").append(i + 1);
+						}
+						arrayString.append("]");
+					}
+					if (completionSnippetsSupported) {
+						arrayString.append("$0");
+					}
+					str = arrayString.toString();
+				}
+			} else {
+				str = String.valueOf(proposal.getCompletion());
+				if (completionSnippetsSupported) {
+					str = CompletionUtils.sanitizeCompletion(str);
+					if (proposal.getKind() == CompletionProposal.PACKAGE_REF && str != null && str.endsWith(".*;")) {
+						str = str.replace(".*;", ".${0:*};");
+					}
 				}
 			}
 			buffer.append(str);
@@ -495,7 +547,7 @@ public class CompletionProposalReplacementProvider {
 
 		// we're inserting a method plus the argument list - respect formatter preferences
 		appendMethodNameReplacement(buffer, proposal);
-		final boolean addParen  = client.isCompletionSnippetsSupported();
+		final boolean addParen = completionSnippetsSupported;
 		if(addParen) {
 			buffer.append(LPAREN);
 		}
