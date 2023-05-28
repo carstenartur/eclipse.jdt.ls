@@ -22,17 +22,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.core.internal.resources.Workspace;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
-import org.eclipse.core.resources.IResourceRuleFactory;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.resources.ResourcesPlugin;
-import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
@@ -42,7 +41,7 @@ import org.eclipse.core.runtime.OperationCanceledException;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
-import org.eclipse.core.runtime.jobs.MultiRule;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
@@ -107,28 +106,34 @@ public abstract class BaseDocumentLifeCycleHandler {
 	private static final long PUBLISH_DIAGNOSTICS_MAX_DEBOUNCE = 2000; /*ms*/
 
 	private CoreASTProvider sharedASTProvider;
-	private WorkspaceJob validationTimer;
-	private WorkspaceJob publishDiagnosticsJob;
+	private Job validationTimer;
+	private Job publishDiagnosticsJob;
 	private Set<ICompilationUnit> toReconcile = new HashSet<>();
+	private Set<ICompilationUnit> toValidate = ConcurrentHashMap.newKeySet();
 	private Map<String, Integer> documentVersions = new HashMap<>();
 	private MovingAverage movingAverageForValidation = new MovingAverage(DOCUMENT_LIFECYCLE_MAX_DEBOUNCE);
 	private MovingAverage movingAverageForDiagnostics = new MovingAverage(PUBLISH_DIAGNOSTICS_MIN_DEBOUNCE);
 	protected final PreferenceManager preferenceManager;
+	private Object reconcileLock = new Object();
 
 	public BaseDocumentLifeCycleHandler(PreferenceManager preferenceManager, boolean delayValidation) {
 		this.preferenceManager = preferenceManager;
 		this.sharedASTProvider = CoreASTProvider.getInstance();
 		if (delayValidation) {
-			this.validationTimer = new WorkspaceJob("Validate documents") {
+			this.validationTimer = new Job("Validate documents") {
 				@Override
-				public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
-					long startTime = System.nanoTime();
-					IStatus status = performValidation(monitor);
-					if (status.getSeverity() != IStatus.CANCEL) {
-						long elapsedTime = System.nanoTime() - startTime;
-						movingAverageForValidation.update(elapsedTime / 1_000_000);
+				protected IStatus run(IProgressMonitor monitor) {
+					try {
+						long startTime = System.nanoTime();
+						IStatus status = performValidation(monitor);
+						if (status.getSeverity() != IStatus.CANCEL) {
+							long elapsedTime = System.nanoTime() - startTime;
+							movingAverageForValidation.update(elapsedTime / 1_000_000);
+						}
+						return status;
+					} catch (JavaModelException e) {
+						return e.getStatus();
 					}
-					return status;
 				}
 
 				/* (non-Javadoc)
@@ -139,7 +144,7 @@ public abstract class BaseDocumentLifeCycleHandler {
 					return DOCUMENT_LIFE_CYCLE_JOBS.equals(family);
 				}
 			};
-			this.publishDiagnosticsJob = new PublishDiagnosticJob(ResourcesPlugin.getWorkspace().getRoot());
+			this.publishDiagnosticsJob = new PublishDiagnosticJob();
 		}
 	}
 
@@ -163,12 +168,10 @@ public abstract class BaseDocumentLifeCycleHandler {
 		}
 		if (validationTimer != null) {
 			validationTimer.cancel();
-			ISchedulingRule rule = getRule(toReconcile);
 			if (publishDiagnosticsJob != null) {
 				publishDiagnosticsJob.cancel();
-				publishDiagnosticsJob = new PublishDiagnosticJob(rule);
+				publishDiagnosticsJob = new PublishDiagnosticJob();
 			}
-			validationTimer.setRule(rule);
 			validationTimer.schedule(delay);
 		} else {
 			performValidation(new NullProgressMonitor());
@@ -190,18 +193,6 @@ public abstract class BaseDocumentLifeCycleHandler {
 		);
 	}
 
-	private ISchedulingRule getRule(Set<ICompilationUnit> units) {
-		ISchedulingRule result = null;
-		IResourceRuleFactory ruleFactory = ResourcesPlugin.getWorkspace().getRuleFactory();
-		for (ICompilationUnit unit : units) {
-			if (unit.getResource() != null) {
-				ISchedulingRule rule = ruleFactory.createRule(unit.getResource());
-				result = MultiRule.combine(rule, result);
-			}
-		}
-		return result;
-	}
-
 	private IStatus performValidation(IProgressMonitor monitor) throws JavaModelException {
 		long start = System.currentTimeMillis();
 
@@ -219,13 +210,17 @@ public abstract class BaseDocumentLifeCycleHandler {
 		}
 		// first reconcile all units with content changes
 		SubMonitor progress = SubMonitor.convert(monitor, cusToReconcile.size() + 1);
-		for (ICompilationUnit cu : cusToReconcile) {
-			if (monitor.isCanceled()) {
-				return Status.CANCEL_STATUS;
+		synchronized(reconcileLock) {
+			for (ICompilationUnit cu : cusToReconcile) {
+				if (monitor.isCanceled()) {
+					return Status.CANCEL_STATUS;
+				}
+				cu.makeConsistent(progress);
+				toValidate.add(cu);
+				//cu.reconcile(ICompilationUnit.NO_AST, false, null, progress.newChild(1));
 			}
-			cu.makeConsistent(progress);
-			//cu.reconcile(ICompilationUnit.NO_AST, false, null, progress.newChild(1));
 		}
+
 		JavaLanguageServerPlugin.logInfo("Reconciled " + cusToReconcile.size() + ". Took " + (System.currentTimeMillis() - start) + " ms");
 		if (monitor.isCanceled()) {
 			return Status.CANCEL_STATUS;
@@ -247,27 +242,48 @@ public abstract class BaseDocumentLifeCycleHandler {
 		return Status.OK_STATUS;
 	}
 
+	public IStatus validateDocument(String uri, boolean debounce, IProgressMonitor monitor) throws JavaModelException {
+		ICompilationUnit unit = resolveCompilationUnit(uri);
+		if (unit == null || unit.getResource() == null || unit.getResource().isDerived()) {
+			return Status.OK_STATUS;
+		}
+
+		toValidate.add(unit);
+		if (debounce && publishDiagnosticsJob != null) {
+			publishDiagnosticsJob.cancel();
+			publishDiagnosticsJob.setRule(null);
+			if (monitor.isCanceled()) {
+				return Status.CANCEL_STATUS;
+			}
+			publishDiagnosticsJob.schedule(getPublishDiagnosticsDelay());
+			return Status.OK_STATUS;
+		}
+
+		return publishDiagnostics(monitor);
+	}
 	public IStatus publishDiagnostics(IProgressMonitor monitor) throws JavaModelException {
 		long start = System.currentTimeMillis();
 		if (monitor.isCanceled()) {
 			return Status.CANCEL_STATUS;
 		}
-		this.sharedASTProvider.disposeAST();
-		List<ICompilationUnit> toValidate = Arrays.asList(JavaCore.getWorkingCopies(null));
-		if (toValidate.isEmpty()) {
+		List<ICompilationUnit> validateCopy =
+			preferenceManager.getPreferences().isValidateAllOpenBuffersOnChanges()
+				? Arrays.asList(JavaCore.getWorkingCopies(null)) : new ArrayList<>(toValidate);
+		if (validateCopy.isEmpty()) {
 			return Status.OK_STATUS;
 		}
-		SubMonitor progress = SubMonitor.convert(monitor, toValidate.size() + 1);
+		SubMonitor progress = SubMonitor.convert(monitor, validateCopy.size() + 1);
 		if (monitor.isCanceled()) {
 			return Status.CANCEL_STATUS;
 		}
-		for (ICompilationUnit rootToValidate : toValidate) {
+		for (ICompilationUnit rootToValidate : validateCopy) {
 			if (monitor.isCanceled()) {
 				return Status.CANCEL_STATUS;
 			}
 			publishDiagnostics(rootToValidate, progress.newChild(1));
+			toValidate.remove(rootToValidate);
 		}
-		JavaLanguageServerPlugin.logInfo("Validated " + toValidate.size() + ". Took " + (System.currentTimeMillis() - start) + " ms");
+		JavaLanguageServerPlugin.logInfo("Validated " + validateCopy.size() + ". Took " + (System.currentTimeMillis() - start) + " ms");
 		return Status.OK_STATUS;
 	}
 
@@ -300,7 +316,9 @@ public abstract class BaseDocumentLifeCycleHandler {
 
 		};
 		int flags = ICompilationUnit.FORCE_PROBLEM_DETECTION | ICompilationUnit.ENABLE_BINDINGS_RECOVERY | ICompilationUnit.ENABLE_STATEMENTS_RECOVERY;
-		unit.reconcile(ICompilationUnit.NO_AST, flags, wcOwner, monitor);
+		synchronized(reconcileLock) {
+			unit.reconcile(ICompilationUnit.NO_AST, flags, wcOwner, monitor);
+		}
 	}
 
 	public void didClose(DidCloseTextDocumentParams params) {
@@ -460,6 +478,7 @@ public abstract class BaseDocumentLifeCycleHandler {
 			synchronized (toReconcile) {
 				toReconcile.remove(unit);
 			}
+			toValidate.remove(unit);
 			if (isSyntaxMode(unit) || !unit.exists() || unit.getResource().isDerived()) {
 				createDiagnosticsHandler(unit).clearDiagnostics();
 			} else if (hasUnsavedChanges(unit)) {
@@ -700,24 +719,27 @@ public abstract class BaseDocumentLifeCycleHandler {
 	 * @author mistria
 	 *
 	 */
-	private final class PublishDiagnosticJob extends WorkspaceJob {
+	private final class PublishDiagnosticJob extends Job {
 		/**
 		 * @param rule
 		 */
-		private PublishDiagnosticJob(ISchedulingRule rule) {
+		private PublishDiagnosticJob() {
 			super("Publish Diagnostics");
-			setRule(rule);
 		}
 
 		@Override
-		public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
-			long startTime = System.nanoTime();
-			IStatus status = publishDiagnostics(monitor);
-			if (status.getSeverity() != IStatus.CANCEL) {
-				long elapsedTime = System.nanoTime() - startTime;
-				movingAverageForDiagnostics.update(elapsedTime / 1_000_000);
+		public IStatus run(IProgressMonitor monitor) {
+			try {
+				long startTime = System.nanoTime();
+				IStatus status = publishDiagnostics(monitor);
+				if (status.getSeverity() != IStatus.CANCEL) {
+					long elapsedTime = System.nanoTime() - startTime;
+					movingAverageForDiagnostics.update(elapsedTime / 1_000_000);
+				}
+				return status;
+			} catch (JavaModelException e) {
+				return e.getStatus();
 			}
-			return status;
 		}
 
 		/* (non-Javadoc)
