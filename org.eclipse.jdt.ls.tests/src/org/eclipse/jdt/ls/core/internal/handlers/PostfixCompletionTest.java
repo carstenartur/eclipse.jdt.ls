@@ -109,6 +109,32 @@ public class PostfixCompletionTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void test_assert() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(Boolean identifier) {\n" +
+			"		identifier.assert" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "identifier.assert");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("assert", item.getLabel());
+		assertEquals(item.getInsertText(), "assert identifier;");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(3, 2), new Position(3, 19)), range);
+	}
+
+	@Test
 	public void test_cast() throws JavaModelException {
 		when(preferenceManager.getClientPreferences().isCompletionItemLabelDetailsSupport()).thenReturn(true);
 		when(preferenceManager.getClientPreferences().getCompletionItemInsertTextModeDefault()).thenReturn(InsertTextMode.AsIs);
@@ -324,6 +350,58 @@ public class PostfixCompletionTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void test_opt() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(Object identifier) {\n" +
+			"		identifier.opt" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "identifier.opt");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("opt", item.getLabel());
+		assertEquals(item.getInsertText(), "Optional.ofNullable(identifier)");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(3, 2), new Position(3, 16)), range);
+	}
+
+	@Test
+	public void test_not() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(boolean a) {\n" +
+			"		a.not" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "a.not");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("not", item.getLabel());
+		assertEquals(item.getInsertText(), "!a");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(3, 2), new Position(3, 7)), range);
+	}
+
+	@Test
 	public void test_sysout() throws JavaModelException {
 		//@formatter:off
 		ICompilationUnit unit = getWorkingCopy(
@@ -407,6 +485,60 @@ public class PostfixCompletionTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
+	public void test_sysoutv_object() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(String a) {\n" +
+			"		Boolean foo = true;\n" +
+			"		foo.sysoutv" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "foo.sysoutv");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("sysoutv", item.getLabel());
+		assertEquals(item.getInsertText(), "System.out.println(\"foo = \" + foo);${0}");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(4, 2), new Position(4, 13)), range);
+	}
+
+	@Test
+	public void test_sysouf_object() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(String a) {\n" +
+			"		Boolean foo = true;\n" +
+			"		foo.sysouf" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "foo.sysouf");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("sysouf", item.getLabel());
+		assertEquals(item.getInsertText(), "System.out.printf(\"\", foo);${0}");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(4, 2), new Position(4, 12)), range);
+	}
+
+	@Test
 	public void test_syserr_object() throws JavaModelException {
 		//@formatter:off
 		ICompilationUnit unit = getWorkingCopy(
@@ -431,6 +563,30 @@ public class PostfixCompletionTest extends AbstractCompilationUnitBasedTest {
 		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
 		Range range = item.getAdditionalTextEdits().get(0).getRange();
 		assertEquals(new Range(new Position(4, 2), new Position(4, 12)), range);
+	}
+
+	@Test
+	public void test_format() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(String a) {\n" +
+			"		a.format" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "a.format");
+
+		assertNotNull(list);
+
+		CompletionItem item = list.getItems().stream().filter(i -> i.getKind() == CompletionItemKind.Snippet).findFirst().orElse(null);
+		assertEquals("format", item.getLabel());
+		assertEquals(item.getTextEditText(), "String.format(a, ${0});");
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(3, 2), new Position(3, 10)), range);
 	}
 
 	@Test
@@ -513,6 +669,32 @@ public class PostfixCompletionTest extends AbstractCompilationUnitBasedTest {
 		Range range =additionalTextEdits.get(0).getRange();
 		assertEquals(new Range(new Position(4, 2), new Position(4, 29)), range);
 		assertTrue(additionalTextEdits.stream().anyMatch(e -> e.getNewText().contains("import java.util.List;")));
+	}
+
+	@Test
+	public void test_par() throws JavaModelException {
+		//@formatter:off
+		ICompilationUnit unit = getWorkingCopy(
+			"src/org/sample/Test.java",
+			"package org.sample;\n" +
+			"public class Test {\n" +
+			"	public void testMethod(String a) {\n" +
+			"		a.par" +
+			"	}\n" +
+			"}"
+		);
+		//@formatter:on
+		CompletionList list = requestCompletions(unit, "a.par");
+
+		assertNotNull(list);
+
+		List<CompletionItem> items = new ArrayList<>(list.getItems());
+		CompletionItem item = items.get(0);
+		assertEquals("par", item.getLabel());
+		assertEquals(item.getInsertText(), "(a)");
+		assertEquals(item.getInsertTextFormat(), InsertTextFormat.Snippet);
+		Range range = item.getAdditionalTextEdits().get(0).getRange();
+		assertEquals(new Range(new Position(3, 2), new Position(3, 7)), range);
 	}
 
 	@Test

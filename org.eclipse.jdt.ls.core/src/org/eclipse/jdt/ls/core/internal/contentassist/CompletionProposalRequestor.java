@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,7 @@ import org.eclipse.jdt.ls.core.contentassist.ICompletionRankingProvider;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionContributionService;
+import org.eclipse.jdt.ls.core.internal.handlers.CompletionGuessMethodArgumentsMode;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionMatchCaseMode;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionRankingAggregation;
 import org.eclipse.jdt.ls.core.internal.handlers.CompletionResolveHandler;
@@ -64,6 +66,8 @@ import com.google.common.collect.ImmutableSet;
 public final class CompletionProposalRequestor extends CompletionRequestor {
 
 	private List<CompletionProposal> proposals = new ArrayList<>();
+	// Cache to store all the types that has been collapsed, due to off mode of argument guessing.
+	private Set<String> collapsedTypes = new HashSet<>();
 	private final ICompilationUnit unit;
 	private final String uri; // URI of this.unit, used in future "resolve" requests
 	private CompletionProposalDescriptionProvider descriptionProvider;
@@ -204,6 +208,10 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 			return;
 		}
 
+		if (needToCollapse(proposal)) {
+			return;
+		}
+
 		if (proposal.getKind() == CompletionProposal.POTENTIAL_METHOD_DECLARATION) {
 			acceptPotentialMethodDeclaration(proposal);
 		} else {
@@ -245,11 +253,13 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		}
 
 		List<Map<String, String>> contributedData = new LinkedList<>();
-		//Let's compute replacement texts for the most relevant results only
-		for (int i = 0; i < limit; i++) {
-			CompletionProposal proposal = proposals.get(i);
+		int pId = 0; // store the index of the completion item in the list
+		int proposalIndex = 0; // to iterate through proposals
+		List<CompletionProposal> proposalsToBeCached = new LinkedList<>();
+		for (; pId < limit && proposalIndex < proposals.size(); proposalIndex++) {
+			CompletionProposal proposal = proposals.get(proposalIndex);
 			try {
-				CompletionItem item = toCompletionItem(proposal, i);
+				CompletionItem item = toCompletionItem(proposal, pId);
 				CompletionRankingAggregation rankingResult = proposalToRankingResult.get(proposal);
 				if (rankingResult != null) {
 					String decorators = rankingResult.getDecorators();
@@ -265,18 +275,47 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 					contributedData.add(rankingData);
 				}
 				completionItems.add(item);
+				proposalsToBeCached.add(proposal);
+				pId++;
 			} catch (Exception e) {
-				JavaLanguageServerPlugin.logException(e.getMessage(), e);
+				JavaLanguageServerPlugin.logException(
+					"Failed to convert completion proposal to completion item",
+					e
+				);
+			}
+		}
+		// see https://github.com/eclipse/eclipse.jdt.ls/issues/2669
+		Either<Range, InsertReplaceRange> editRange = itemDefaults.getEditRange();
+		if (editRange != null) {
+			Range range;
+			if (editRange.getLeft() != null) {
+				range = editRange.getLeft();
+			} else if (editRange.getRight() != null) {
+				range = editRange.getRight().getInsert() != null ? editRange.getRight().getInsert() : editRange.getRight().getReplace();
+			} else {
+				range = null;
+			}
+			int line = -1;
+			if (range != null) {
+				int offset = response.getOffset();
+				try {
+					Range offsetRange = JDTUtils.toRange(unit, offset, 0);
+					line = offsetRange.getStart().getLine();
+				} catch (JavaModelException e) {
+					// ignore
+				}
+			}
+			if (range != null && range.getStart().getLine() != line) {
+				itemDefaults.setEditRange(null);
+				itemDefaults.setInsertTextFormat(null);
 			}
 		}
 
-		if (proposals.size() > maxCompletions) {
+		if (proposals.size() > proposalIndex) {
 			//we keep receiving completions past our capacity so that makes the whole result incomplete
 			isComplete = false;
-			response.setProposals(proposals.subList(0, limit));
-		} else {
-			response.setProposals(proposals);
 		}
+		response.setProposals(proposalsToBeCached);
 		response.setItems(completionItems);
 		response.setCommonData(CompletionResolveHandler.DATA_FIELD_URI, uri);
 		response.setCompletionItemData(contributedData);
@@ -612,6 +651,19 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 			return true;
 		}
 
+		if (proposal.getKind() == CompletionProposal.CONSTRUCTOR_INVOCATION
+				|| proposal.getKind() == CompletionProposal.ANONYMOUS_CLASS_CONSTRUCTOR_INVOCATION
+				|| proposal.getKind() == CompletionProposal.ANONYMOUS_CLASS_DECLARATION) {
+			CompletionProposal[] requiredProposals = proposal.getRequiredProposals();
+			if (requiredProposals != null) {
+				for (CompletionProposal requiredProposal : requiredProposals) {
+					if (requiredProposal.getKind() == CompletionProposal.TYPE_REF) {
+						proposal = requiredProposal;
+					}
+				}
+			}
+		}
+
 		char firstCharOfCompletion;
 		if (proposal.getKind() == CompletionProposal.TYPE_REF) {
 			String simpleTypeName = SignatureUtil.getSimpleTypeName(proposal);
@@ -620,10 +672,22 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 			firstCharOfCompletion = proposal.getCompletion()[0];
 		}
 
-		if (this.context.getToken()[0] != firstCharOfCompletion) {
+		return this.context.getToken()[0] == firstCharOfCompletion;
+	}
+
+	/**
+	 * Check if the current completion proposal needs to be collapsed.
+	 */
+	private boolean needToCollapse(CompletionProposal proposal) {
+		if (preferenceManager.getPreferences().getGuessMethodArgumentsMode() != CompletionGuessMethodArgumentsMode.OFF) {
 			return false;
 		}
 
-		return true;
+		CompletionProposal requiredProposal = CompletionProposalUtils.getRequiredTypeProposal(proposal);
+		if (requiredProposal == null) {
+			return false;
+		}
+
+		return !collapsedTypes.add(String.valueOf(requiredProposal.getSignature()));
 	}
 }

@@ -62,6 +62,7 @@ import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.lsp4j.CompletionContext;
 import org.eclipse.lsp4j.CompletionItem;
+import org.eclipse.lsp4j.CompletionItemDefaults;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionItemTag;
 import org.eclipse.lsp4j.CompletionList;
@@ -201,7 +202,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		IJavaProject javaProject = JavaCore.create(project);
 		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
 		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
-		Mockito.when(mockCapabilies.isSupportsCompletionDocumentationMarkdown()).thenReturn(true);
+		Mockito.lenient().when(mockCapabilies.isSupportsCompletionDocumentationMarkdown()).thenReturn(true);
 		ICompilationUnit unit = (ICompilationUnit) javaProject.findElement(new Path("org/sample/Foo5.java"));
 		unit.becomeWorkingCopy(null);
 		try {
@@ -427,7 +428,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		ClientPreferences mockCapabilies = Mockito.mock(ClientPreferences.class);
 		Mockito.when(preferenceManager.getClientPreferences()).thenReturn(mockCapabilies);
 		Mockito.when(mockCapabilies.isCompletionSnippetsSupported()).thenReturn(false);
-		Mockito.when(mockCapabilies.isCompletionItemInsertTextModeSupport(InsertTextMode.AdjustIndentation)).thenReturn(true);
+		Mockito.lenient().when(mockCapabilies.isCompletionItemInsertTextModeSupport(InsertTextMode.AdjustIndentation)).thenReturn(true);
 		Mockito.when(mockCapabilies.getCompletionItemInsertTextModeDefault()).thenReturn(InsertTextMode.AsIs);
 
 		ICompilationUnit unit = getWorkingCopy(
@@ -728,16 +729,16 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 	}
 
 	@Test
-	public void testCompletion_method_guessMethodArgumentsFalse() throws JavaModelException {
-		testCompletion_method_guessMethodArguments(false, "test(${1:name}, ${2:i});");
+	public void testCompletion_method_insertParameterNames() throws JavaModelException {
+		testCompletion_method_guessMethodArguments(CompletionGuessMethodArgumentsMode.INSERT_PARAMETER_NAMES, "test(${1:name}, ${2:i});");
 	}
 
 	@Test
-	public void testCompletion_method_guessMethodArgumentsTrue() throws JavaModelException {
-		testCompletion_method_guessMethodArguments(true, "test(${1:str}, ${2:x});");
+	public void testCompletion_method_insertBestGuessedArguments() throws JavaModelException {
+		testCompletion_method_guessMethodArguments(CompletionGuessMethodArgumentsMode.INSERT_BEST_GUESSED_ARGUMENTS, "test(${1:str}, ${2:x});");
 	}
 
-	private void testCompletion_method_guessMethodArguments(boolean guessMethodArguments, String expected) throws JavaModelException {
+	private void testCompletion_method_guessMethodArguments(CompletionGuessMethodArgumentsMode guessMethodArguments, String expected) throws JavaModelException {
 		ICompilationUnit unit = getWorkingCopy(
 		//@formatter:off
 				"src/java/Foo.java",
@@ -750,9 +751,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 				"	}\n\n" +
 				"}\n");
 		//@formatter:on
-		boolean oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().isGuessMethodArguments();
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
 		try {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(guessMethodArguments);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(guessMethodArguments);
 			CompletionList list = requestCompletions(unit, "tes");
 			assertNotNull(list);
 			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("test(String name, int i) : void")).findFirst().orElse(null);
@@ -764,7 +765,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 			assertNotNull(ci.getTextEdit().getLeft());
 			assertTextEdit(5, 2, 5, expected, ci.getTextEdit().getLeft());
 		} finally {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(oldGuessMethodArguments);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
 		}
 	}
 
@@ -781,9 +782,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 				"	}\n\n" +
 				"}\n");
 		//@formatter:on
-		boolean oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().isGuessMethodArguments();
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
 		try {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(true);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(CompletionGuessMethodArgumentsMode.INSERT_BEST_GUESSED_ARGUMENTS);
 			CompletionList list = requestCompletions(unit, "tes");
 			assertNotNull(list);
 			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("test(String name, int i) : void")).findFirst().orElse(null);
@@ -795,7 +796,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 			assertNotNull(ci.getTextEdit().getLeft());
 			assertTextEdit(4, 2, 5, "test(${1:str}, ${2:0});", ci.getTextEdit().getLeft());
 		} finally {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(oldGuessMethodArguments);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
 		}
 	}
 
@@ -813,9 +814,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 				"	}\n\n" +
 				"}\n");
 		//@formatter:on
-		boolean oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().isGuessMethodArguments();
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
 		try {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(true);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(CompletionGuessMethodArgumentsMode.INSERT_BEST_GUESSED_ARGUMENTS);
 			CompletionList list = requestCompletions(unit, "tes");
 			assertNotNull(list);
 			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("test(int i, int j) : void")).findFirst().orElse(null);
@@ -827,7 +828,7 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 			assertNotNull(ci.getTextEdit().getLeft());
 			assertTextEdit(5, 2, 5, "test(${1:one}, ${2:two});", ci.getTextEdit().getLeft());
 		} finally {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(oldGuessMethodArguments);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
 		}
 	}
 
@@ -844,9 +845,9 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 				"	private static class A { public A(String name){} }\n" +
 				"}\n");
 		//@formatter:on
-		boolean oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().isGuessMethodArguments();
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
 		try {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(true);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(CompletionGuessMethodArgumentsMode.INSERT_BEST_GUESSED_ARGUMENTS);
 			CompletionList list = requestCompletions(unit, "new A");
 			assertNotNull(list);
 			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("A(String name)")).findFirst().orElse(null);
@@ -858,7 +859,60 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 			assertNotNull(ci.getTextEdit().getLeft());
 			assertTextEdit(3, 6, 7, "A(${1:str})", ci.getTextEdit().getLeft());
 		} finally {
-			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArguments(oldGuessMethodArguments);
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
+		}
+	}
+
+	@Test
+	public void testCompletion_method_turnOffGuessMethodArguments() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"""
+				public class Foo {
+					static void test(int i, int j) {}
+					public static void main(String[] args) {
+						int one=1;
+						int two=2;
+						tes
+					}
+				}
+				"""
+		);
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
+		try {
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(CompletionGuessMethodArgumentsMode.OFF);
+			CompletionList list = requestCompletions(unit, "tes");
+			assertNotNull(list);
+			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("test(int i, int j) : void")).findFirst().orElse(null);
+			assertNotNull(ci);
+			assertTextEdit(5, 2, 5, "test(${0});", ci.getTextEdit().getLeft());
+		} finally {
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
+		}
+	}
+
+	@Test
+	public void testCompletion_constructor_turnOffGuessMethodArguments() throws JavaModelException {
+		ICompilationUnit unit = getWorkingCopy(
+				"src/java/Foo.java",
+				"""
+				public class Foo {
+					public static void main(String[] args) {
+						String s = new String
+					}
+				}
+				"""
+		);
+		CompletionGuessMethodArgumentsMode oldGuessMethodArguments = JavaLanguageServerPlugin.getPreferencesManager().getPreferences().getGuessMethodArgumentsMode();
+		try {
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(CompletionGuessMethodArgumentsMode.OFF);
+			CompletionList list = requestCompletions(unit, "new String");
+			assertNotNull(list);
+			CompletionItem ci = list.getItems().stream().filter(item -> item.getLabel().equals("String - java.lang")).findFirst().orElse(null);
+			assertNotNull(ci);
+			assertEquals("String(${0})", ci.getTextEdit().getLeft().getNewText());
+		} finally {
+			JavaLanguageServerPlugin.getPreferencesManager().getPreferences().setGuessMethodArgumentsMode(oldGuessMethodArguments);
 		}
 	}
 
@@ -3518,6 +3572,30 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		}
 	}
 
+	@Test
+	public void testCompletion_MatchCaseFirstLetterForConstructor() throws Exception {
+		try {
+			preferenceManager.getPreferences().setCompletionMatchCaseMode(CompletionMatchCaseMode.FIRSTLETTER);
+			ICompilationUnit unit = getWorkingCopy("src/org/sample/Test.java", String.join("\n",
+			//@formatter:off
+					"package org.sample",
+					"public class Test {",
+					"	public static void main(String[] args) {",
+					"		String a = new S",
+					"	}",
+					"}"));
+					//@formatter:on
+			CompletionList list = requestCompletions(unit, "new S");
+			assertFalse(list.getItems().isEmpty());
+			assertTrue(list.getItems().stream()
+				.allMatch(t -> Character.isUpperCase(t.getLabel().charAt(0))));
+			assertTrue(list.getItems().stream()
+				.anyMatch(t -> t.getLabel().startsWith("String")));
+		} finally {
+			preferenceManager.getPreferences().setCompletionMatchCaseMode(CompletionMatchCaseMode.OFF);
+		}
+	}
+
 	// https://github.com/eclipse/eclipse.jdt.ls/issues/2376
 	@Test
 	public void testCompletion_selectSnippetItem() throws Exception {
@@ -3637,6 +3715,102 @@ public class CompletionHandlerTest extends AbstractCompilationUnitBasedTest {
 		CompletionItem completionItem = list.getItems().get(0);
 		assertEquals("Array type completion EditText", "Arr[]", completionItem.getInsertText());
 		assertEquals("Array type completion Label", "Arr[] - java", completionItem.getLabel());
+	}
+
+	// this test should pass when starting with -javaagent:<lombok_jar> (-javagent:~/.m2/repository/org/projectlombok/lombok/1.18.28/lombok-1.18.28.jar)
+	// https://github.com/eclipse/eclipse.jdt.ls/issues/2669
+	@Test
+	public void testCompletion_lombok() throws Exception {
+		boolean lombokDisabled = "true".equals(System.getProperty("jdt.ls.lombok.disabled"));
+		if (lombokDisabled) {
+			return;
+		}
+		when(preferenceManager.getClientPreferences().isCompletionInsertReplaceSupport()).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsSupport()).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("editRange")).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("insertTextFormat")).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionItemInsertTextModeSupport(InsertTextMode.AdjustIndentation)).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("insertTextMode")).thenReturn(true);
+		importProjects("maven/mavenlombok");
+		IProject proj = WorkspaceHelper.getProject("mavenlombok");
+		IJavaProject javaProject = JavaCore.create(proj);
+		ICompilationUnit unit = null;
+		try {
+			unit = (ICompilationUnit) javaProject.findElement(new Path("org/sample/Test.java"));
+			unit.becomeWorkingCopy(null);
+			String source =
+			//@formatter:off
+				"package org.sample;\n"
+				+ "import lombok.Builder;\n"
+				+ "import lombok.Data;\n"
+				+ "import lombok.Builder.Default;\n"
+				+ "@Data\n"
+				+ "@Builder\n"
+				+ "public class Test {\n"
+				+ "      @Default\n"
+				+ "      private Integer offset = ;\n"
+				+ "}\n";
+			//@formatter:on
+			changeDocument(unit, source, 1);
+			Job.getJobManager().join(DocumentLifeCycleHandler.DOCUMENT_LIFE_CYCLE_JOBS, new NullProgressMonitor());
+			CompletionList list = requestCompletions(unit, " = ");
+			assertNotNull(list);
+			assertEquals(6, list.getItems().size());
+			CompletionItemDefaults itemDefaults = list.getItemDefaults();
+			assertNotNull(itemDefaults);
+			assertNull(itemDefaults.getInsertTextFormat());
+			assertNull(itemDefaults.getEditRange());
+		} finally {
+			unit.discardWorkingCopy();
+			proj.delete(true, monitor);
+		}
+	}
+
+	// this test should pass when starting with -javaagent:<lombok_jar> (-javagent:~/.m2/repository/org/projectlombok/lombok/1.18.28/lombok-1.18.28.jar)
+	// https://github.com/eclipse/eclipse.jdt.ls/issues/2669
+	@Test
+	public void testCompletion_lombok2() throws Exception {
+		boolean lombokDisabled = "true".equals(System.getProperty("jdt.ls.lombok.disabled"));
+		if (lombokDisabled) {
+			return;
+		}
+		when(preferenceManager.getClientPreferences().isCompletionInsertReplaceSupport()).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsSupport()).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("editRange")).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("insertTextFormat")).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionItemInsertTextModeSupport(InsertTextMode.AdjustIndentation)).thenReturn(true);
+		when(preferenceManager.getClientPreferences().isCompletionListItemDefaultsPropertySupport("insertTextMode")).thenReturn(true);
+		importProjects("maven/mavenlombok");
+		IProject proj = WorkspaceHelper.getProject("mavenlombok");
+		IJavaProject javaProject = JavaCore.create(proj);
+		ICompilationUnit unit = null;
+		try {
+			unit = (ICompilationUnit) javaProject.findElement(new Path("org/sample/Test.java"));
+			unit.becomeWorkingCopy(null);
+			String source =
+			//@formatter:off
+					"package org.sample;\n"
+					+ "import lombok.Builder;\n"
+					+ "import lombok.Data;\n"
+					+ "import lombok.Builder.Default;\n"
+					+ "@Data\n"
+					+ "@Builder\n"
+					+ "public class Test {\n"
+					+ "      private Integer offset = ;\n"
+					+ "}\n";
+				//@formatter:on
+			changeDocument(unit, source, 1);
+			Job.getJobManager().join(DocumentLifeCycleHandler.DOCUMENT_LIFE_CYCLE_JOBS, new NullProgressMonitor());
+			CompletionList list = requestCompletions(unit, " = ");
+			assertNotNull(list);
+			assertEquals(19, list.getItems().size());
+			CompletionItemDefaults itemDefaults = list.getItemDefaults();
+			assertNotNull(itemDefaults);
+			assertNotNull(itemDefaults.getEditRange());
+		} finally {
+			unit.discardWorkingCopy();
+			proj.delete(true, monitor);
+		}
 	}
 
 	private CompletionList requestCompletions(ICompilationUnit unit, String completeBehind) throws JavaModelException {
